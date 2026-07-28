@@ -1,0 +1,5 @@
+﻿-- ============================================================
+-- Initial Database Schema
+-- ============================================================
+-- TODO: Define initial table creation SQL
+-- See ERD/ for entity-relationship diagrams

@@ -1,4 +1,4 @@
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Mail } from "lucide-react";
 import { AuthShell } from "../components/layout/AuthShell";
 import { Input } from "../components/ui/input";

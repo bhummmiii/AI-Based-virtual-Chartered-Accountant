@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { useState, useEffect } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -93,8 +93,15 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useApp();
+  const { theme, toggleTheme, refreshClients } = useApp();
   const unread = notifications.filter((n) => n.unread).length;
+
+  // Fetch clients from backend whenever the authenticated shell mounts
+  // (covers the case where login set the token then navigated here)
+  useEffect(() => {
+    refreshClients();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
@@ -186,7 +193,7 @@ export function AppLayout() {
                 <DropdownMenuItem onClick={() => navigate("/app/settings")}>
                   <Settings className="size-4" /> Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate("/")}>
+                <DropdownMenuItem onClick={() => { import("../../services/api").then(m => m.clearToken()); navigate("/"); }}>
                   <LogOut className="size-4" /> Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router";
+import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { AuthShell } from "../components/layout/AuthShell";
 import { Button } from "../components/ui/button";
