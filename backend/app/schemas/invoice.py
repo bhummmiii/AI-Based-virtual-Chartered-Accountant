@@ -1,4 +1,5 @@
 """Invoice schema — matches Invoice model (UUID PKs, vendor_name, Numeric amount)."""
+
 import uuid
 from pydantic import BaseModel
 from typing import Optional

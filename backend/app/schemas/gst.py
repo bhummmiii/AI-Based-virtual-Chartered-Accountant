@@ -1,4 +1,5 @@
 """GST Record schema — matches GSTRecord model (UUID PKs, Numeric tax fields)."""
+
 import uuid
 from pydantic import BaseModel
 from typing import Optional

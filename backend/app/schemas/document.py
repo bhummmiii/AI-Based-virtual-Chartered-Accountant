@@ -1,4 +1,5 @@
 """Document schema — matches Document model (UUID PKs, file_name/file_type/storage_path)."""
+
 import uuid
 from pydantic import BaseModel
 from datetime import datetime

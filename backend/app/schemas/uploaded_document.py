@@ -13,9 +13,19 @@ from decimal import Decimal
 GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$")
 
 VALID_CATEGORIES = {
-    "sales_records", "purchase_records", "credit_note", "debit_note",
-    "b2b_invoice", "b2c_invoice", "hsn_sac", "e_invoice", "e_way_bill",
-    "gst_challan", "gst_return", "gst_notice", "document_list",
+    "sales_records",
+    "purchase_records",
+    "credit_note",
+    "debit_note",
+    "b2b_invoice",
+    "b2c_invoice",
+    "hsn_sac",
+    "e_invoice",
+    "e_way_bill",
+    "gst_challan",
+    "gst_return",
+    "gst_notice",
+    "document_list",
 }
 VALID_DOC_TYPES = {"upload", "scan"}
 
@@ -26,7 +36,10 @@ class DocumentMetaCreate(BaseModel):
     All fields except document_category and document_type are optional —
     they depend on the selected category.
     """
-    document_category: str = Field(..., description="One of the 13 GST document categories")
+
+    document_category: str = Field(
+        ..., description="One of the 13 GST document categories"
+    )
     document_type: str = Field(default="upload", description="upload | scan")
     invoice_type: Optional[str] = None
 
@@ -63,7 +76,9 @@ class DocumentMetaCreate(BaseModel):
     @classmethod
     def v_category(cls, v: str) -> str:
         if v not in VALID_CATEGORIES:
-            raise ValueError(f"Invalid category. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}")
+            raise ValueError(
+                f"Invalid category. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}"
+            )
         return v
 
     @field_validator("document_type")
@@ -121,6 +136,7 @@ class UploadedDocumentResponse(BaseModel):
 
 class UploadedDocumentListItem(BaseModel):
     """Minimal item for list/table views."""
+
     id: uuid.UUID
     document_category: str
     document_type: str

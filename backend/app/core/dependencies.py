@@ -43,5 +43,8 @@ def get_current_user(
 def require_ca_role(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role not in ("ca", "admin"):
         from app.core.exceptions import ForbiddenException
-        raise ForbiddenException(detail="Only Chartered Accountants can access this resource")
+
+        raise ForbiddenException(
+            detail="Only Chartered Accountants can access this resource"
+        )
     return current_user

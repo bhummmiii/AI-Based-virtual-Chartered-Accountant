@@ -1,4 +1,5 @@
 """Audit Report schema — matches AuditReport model (UUID PKs)."""
+
 import uuid
 from pydantic import BaseModel
 from typing import Optional

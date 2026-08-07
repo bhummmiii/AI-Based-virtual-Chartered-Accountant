@@ -15,7 +15,16 @@ import logging
 from typing import Optional, List
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    UploadFile,
+    File,
+    Form,
+    Query,
+    HTTPException,
+    status,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -25,7 +34,10 @@ from app.core.config import get_settings
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.models.user import User
 from app.models.uploaded_document import UploadedDocument
-from app.schemas.uploaded_document import UploadedDocumentResponse, UploadedDocumentListItem
+from app.schemas.uploaded_document import (
+    UploadedDocumentResponse,
+    UploadedDocumentListItem,
+)
 from app.schemas.common import APIResponse
 
 logger = logging.getLogger(__name__)
@@ -97,7 +109,12 @@ async def upload_document(
 ):
     # ── Validate client exists ──
     from app.models.client import Client
-    client = db.query(Client).filter(Client.id == client_id, Client.status != "deleted").first()
+
+    client = (
+        db.query(Client)
+        .filter(Client.id == client_id, Client.status != "deleted")
+        .first()
+    )
     if not client:
         raise NotFoundException(detail=f"Client {client_id} not found")
 
@@ -134,6 +151,7 @@ async def upload_document(
             return None
         try:
             from decimal import Decimal
+
             return Decimal(str(v))
         except Exception:
             return None
@@ -176,8 +194,16 @@ async def upload_document(
     db.add(doc)
     db.commit()
     db.refresh(doc)
-    logger.info("Document uploaded: %s category=%s client=%s", doc.id, doc.document_category, client_id)
-    return APIResponse(data=UploadedDocumentResponse.model_validate(doc), message="Document uploaded successfully")
+    logger.info(
+        "Document uploaded: %s category=%s client=%s",
+        doc.id,
+        doc.document_category,
+        client_id,
+    )
+    return APIResponse(
+        data=UploadedDocumentResponse.model_validate(doc),
+        message="Document uploaded successfully",
+    )
 
 
 # ── List documents for a client ────────────────────────────────
@@ -240,6 +266,7 @@ def download_document(
         raise NotFoundException(detail="File not found")
     # Security: verify the authenticated user uploaded this or is the CA
     from app.models.client import Client
+
     client = db.query(Client).filter(Client.id == doc.client_id).first()
     if not client:
         raise NotFoundException(detail="Associated client not found")

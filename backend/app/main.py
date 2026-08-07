@@ -74,7 +74,11 @@ app.add_middleware(LoggingMiddleware)
 # ── Health Check ──────────────────────────────────────────────
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "healthy", "service": settings.APP_NAME, "version": settings.APP_VERSION}
+    return {
+        "status": "healthy",
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+    }
 
 
 @app.get("/", tags=["Root"])

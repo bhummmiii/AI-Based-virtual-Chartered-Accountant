@@ -15,9 +15,9 @@ engine = create_engine(
     settings.DATABASE_URL,
     pool_size=20,
     max_overflow=10,
-    pool_pre_ping=True,       # reconnect on stale connections
-    pool_recycle=3600,        # recycle connections every hour
-    echo=False,               # set True to log SQL queries
+    pool_pre_ping=True,  # reconnect on stale connections
+    pool_recycle=3600,  # recycle connections every hour
+    echo=False,  # set True to log SQL queries
 )
 
 SessionLocal = sessionmaker(

@@ -1,4 +1,5 @@
 """Tax Record schema — matches TaxRecord model (UUID PKs, Numeric fields)."""
+
 import uuid
 from pydantic import BaseModel
 from datetime import datetime

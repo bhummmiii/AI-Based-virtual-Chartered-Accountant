@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token
+from app.core.security import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+)
 from app.core.exceptions import UnauthorizedException, ConflictException
 from app.core.config import get_settings
 from app.schemas.user import UserLogin, UserRegister, TokenResponse, UserResponse

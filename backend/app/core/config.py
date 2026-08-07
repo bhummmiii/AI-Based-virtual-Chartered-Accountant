@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     BACKEND_PORT: int = 8000
 
     # ── Database ──────────────────────────────────
-    DATABASE_URL: str = "postgresql+psycopg://ca_admin:ca_secure_password@localhost:5432/ca_assistant_db"
+    DATABASE_URL: str = (
+        "postgresql+psycopg://ca_admin:ca_secure_password@localhost:5432/ca_assistant_db"
+    )
 
     # ── JWT Authentication ────────────────────────
     JWT_SECRET_KEY: str = "super-secret-jwt-key-change-in-production-2026"
@@ -29,7 +31,9 @@ class Settings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── CORS ──────────────────────────────────────
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
+    CORS_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:5173,http://localhost:5174"
+    )
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -39,7 +43,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # ── File Upload ───────────────────────────────
-    UPLOAD_DIR: str = "uploads"          # relative to backend/ directory
+    UPLOAD_DIR: str = "uploads"  # relative to backend/ directory
     MAX_UPLOAD_SIZE_MB: int = 20
     ALLOWED_EXTENSIONS: str = "pdf,jpg,jpeg,png,webp,csv,xlsx,xls,json,xml,zip,docx"
 

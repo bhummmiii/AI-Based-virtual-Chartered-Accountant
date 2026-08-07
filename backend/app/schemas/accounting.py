@@ -1,4 +1,5 @@
 """Accounting Record schema — matches AccountingRecord model (UUID, Numeric fields)."""
+
 import uuid
 from pydantic import BaseModel
 from typing import Optional

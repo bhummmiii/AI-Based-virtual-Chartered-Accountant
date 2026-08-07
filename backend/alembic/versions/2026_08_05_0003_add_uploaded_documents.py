@@ -22,10 +22,17 @@ def upgrade() -> None:
     op.create_table(
         "uploaded_documents",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, nullable=False),
-        sa.Column("client_id", UUID(as_uuid=True), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "client_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("clients.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         # Classification
         sa.Column("document_category", sa.String(50), nullable=False),
-        sa.Column("document_type", sa.String(20), nullable=False, server_default="upload"),
+        sa.Column(
+            "document_type", sa.String(20), nullable=False, server_default="upload"
+        ),
         sa.Column("invoice_type", sa.String(30), nullable=True),
         # Core invoice fields
         sa.Column("invoice_number", sa.String(100), nullable=True),
@@ -66,14 +73,35 @@ def upgrade() -> None:
         sa.Column("uploaded_by", sa.String(255), nullable=True),
         sa.Column("metadata", sa.Text(), nullable=True),
         # Timestamps
-        sa.Column("uploaded_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "uploaded_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
     )
     op.create_index("ix_uploaded_documents_id", "uploaded_documents", ["id"])
-    op.create_index("ix_uploaded_doc_client_cat", "uploaded_documents", ["client_id", "document_category"])
+    op.create_index(
+        "ix_uploaded_doc_client_cat",
+        "uploaded_documents",
+        ["client_id", "document_category"],
+    )
     op.create_index("ix_uploaded_doc_gstin", "uploaded_documents", ["gstin"])
-    op.create_index("ix_uploaded_doc_invoice_number", "uploaded_documents", ["invoice_number"])
+    op.create_index(
+        "ix_uploaded_doc_invoice_number", "uploaded_documents", ["invoice_number"]
+    )
     op.create_index("ix_uploaded_doc_status", "uploaded_documents", ["status"])
 
 

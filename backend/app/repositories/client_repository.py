@@ -49,14 +49,16 @@ class ClientRepository:
 
         if search:
             t = f"%{search.strip()}%"
-            q = q.filter(or_(
-                Client.company_name.ilike(t),
-                Client.client_code.ilike(t),
-                Client.contact_person.ilike(t),
-                Client.gst_number.ilike(t),
-                Client.pan_number.ilike(t),
-                Client.email.ilike(t),
-            ))
+            q = q.filter(
+                or_(
+                    Client.company_name.ilike(t),
+                    Client.client_code.ilike(t),
+                    Client.contact_person.ilike(t),
+                    Client.gst_number.ilike(t),
+                    Client.pan_number.ilike(t),
+                    Client.email.ilike(t),
+                )
+            )
         if status_filter:
             q = q.filter(Client.status == status_filter.lower())
         if risk_filter:
@@ -76,9 +78,11 @@ class ClientRepository:
         return self.db.query(Client).filter(Client.client_code == code).first()
 
     def get_by_company_name(self, name: str) -> Optional[Client]:
-        return self.db.query(Client).filter(
-            func.lower(Client.company_name) == name.strip().lower()
-        ).first()
+        return (
+            self.db.query(Client)
+            .filter(func.lower(Client.company_name) == name.strip().lower())
+            .first()
+        )
 
     def get_by_gst(self, gst: str) -> Optional[Client]:
         return self.db.query(Client).filter(Client.gst_number == gst.upper()).first()
@@ -142,7 +146,9 @@ class ClientRepository:
         return self.db.query(TaxRecord).filter(TaxRecord.client_id == client_id).all()
 
     def get_audit_reports(self, client_id) -> List[AuditReport]:
-        return self.db.query(AuditReport).filter(AuditReport.client_id == client_id).all()
+        return (
+            self.db.query(AuditReport).filter(AuditReport.client_id == client_id).all()
+        )
 
     def get_invoices(self, client_id) -> List[Invoice]:
         return self.db.query(Invoice).filter(Invoice.client_id == client_id).all()
@@ -152,19 +158,28 @@ class ClientRepository:
 
     # Latest status helpers for card view
     def get_latest_gst_status(self, client_id) -> Optional[str]:
-        r = self.db.query(GSTRecord.filing_status).filter(
-            GSTRecord.client_id == client_id
-        ).order_by(desc(GSTRecord.created_at)).first()
+        r = (
+            self.db.query(GSTRecord.filing_status)
+            .filter(GSTRecord.client_id == client_id)
+            .order_by(desc(GSTRecord.created_at))
+            .first()
+        )
         return r[0] if r else None
 
     def get_latest_tax_status(self, client_id) -> Optional[str]:
-        r = self.db.query(TaxRecord.status).filter(
-            TaxRecord.client_id == client_id
-        ).order_by(desc(TaxRecord.created_at)).first()
+        r = (
+            self.db.query(TaxRecord.status)
+            .filter(TaxRecord.client_id == client_id)
+            .order_by(desc(TaxRecord.created_at))
+            .first()
+        )
         return r[0] if r else None
 
     def get_latest_audit_status(self, client_id) -> Optional[str]:
-        r = self.db.query(AuditReport.audit_status).filter(
-            AuditReport.client_id == client_id
-        ).order_by(desc(AuditReport.created_at)).first()
+        r = (
+            self.db.query(AuditReport.audit_status)
+            .filter(AuditReport.client_id == client_id)
+            .order_by(desc(AuditReport.created_at))
+            .first()
+        )
         return r[0] if r else None

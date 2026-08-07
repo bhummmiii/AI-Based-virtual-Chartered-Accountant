@@ -18,10 +18,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("clients", sa.Column("billing_cycle",   sa.String(20),  nullable=True, server_default="monthly"))
-    op.add_column("clients", sa.Column("contact_number",  sa.String(20),  nullable=True))
-    op.add_column("clients", sa.Column("email_address",   sa.String(255), nullable=True))
-    op.add_column("clients", sa.Column("location",        sa.String(255), nullable=True))
+    op.add_column(
+        "clients",
+        sa.Column(
+            "billing_cycle", sa.String(20), nullable=True, server_default="monthly"
+        ),
+    )
+    op.add_column("clients", sa.Column("contact_number", sa.String(20), nullable=True))
+    op.add_column("clients", sa.Column("email_address", sa.String(255), nullable=True))
+    op.add_column("clients", sa.Column("location", sa.String(255), nullable=True))
 
 
 def downgrade() -> None:

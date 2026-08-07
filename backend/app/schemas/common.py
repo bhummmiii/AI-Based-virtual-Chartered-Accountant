@@ -11,6 +11,7 @@ T = TypeVar("T")
 
 class APIResponse(BaseModel, Generic[T]):
     """Standard API response wrapper."""
+
     success: bool = True
     message: str = "Success"
     data: Optional[T] = None
@@ -19,6 +20,7 @@ class APIResponse(BaseModel, Generic[T]):
 
 class PaginatedResponse(BaseModel, Generic[T]):
     """Paginated response with metadata."""
+
     items: List[T]
     total: int
     page: int
@@ -28,6 +30,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 class PaginationParams(BaseModel):
     """Query parameters for pagination."""
+
     page: int = 1
     page_size: int = 10
     sort_by: str = "created_at"
