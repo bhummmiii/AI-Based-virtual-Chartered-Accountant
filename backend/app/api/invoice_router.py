@@ -47,6 +47,23 @@ router = APIRouter()
 UPLOAD_BASE = Path(settings.UPLOAD_DIR)
 
 
+def _build_metadata(metadata_json: Optional[str], field_verification: Optional[str]) -> Optional[str]:
+    """Merge metadata_json and field_verification into a single JSON string for the metadata_ column."""
+    import json as _json
+    result: dict = {}
+    if metadata_json:
+        try:
+            result["fields"] = _json.loads(metadata_json)
+        except Exception:
+            result["fields_raw"] = metadata_json
+    if field_verification:
+        try:
+            result["field_verification"] = _json.loads(field_verification)
+        except Exception:
+            result["field_verification_raw"] = field_verification
+    return _json.dumps(result) if result else None
+
+
 def _ensure_dir(client_id: str) -> Path:
     p = UPLOAD_BASE / str(client_id)
     p.mkdir(parents=True, exist_ok=True)
@@ -103,12 +120,20 @@ async def upload_document(
     notice_date: Optional[str] = Form(default=None),
     response_due_date: Optional[str] = Form(default=None),
     priority: Optional[str] = Form(default=None),
+    # Extended: category-specific overflow fields (JSON string)
+    metadata_json: Optional[str] = Form(default=None),
+    # Per-field confidence/verification from OCR (JSON string)
+    field_verification: Optional[str] = Form(default=None),
+    # Force save even if a duplicate is detected
+    force_save: Optional[str] = Form(default="false"),
     file: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     # ── Validate client exists ──
     from app.models.client import Client
+    from app.services.document_validator import detect_duplicate
+    import json as _json
 
     client = (
         db.query(Client)
@@ -117,6 +142,32 @@ async def upload_document(
     )
     if not client:
         raise NotFoundException(detail=f"Client {client_id} not found")
+
+    _force_save = str(force_save or "false").lower() in ("true", "1", "yes")
+
+    # ── Duplicate detection ──
+    if not _force_save:
+        dup = detect_duplicate(
+            db=db,
+            client_id=client_id,
+            document_category=document_category,
+            invoice_number=invoice_number,
+            notice_number=notice_number,
+            arn=arn,
+        )
+        if dup:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "duplicate_detected",
+                    "duplicate": dup,
+                    "message": (
+                        "A document with the same identifier already exists for this client. "
+                        "Submit with force_save=true to save anyway."
+                    ),
+                },
+            )
 
     # ── Handle file ──
     file_path_str: Optional[str] = None
@@ -187,9 +238,10 @@ async def upload_document(
         file_path=file_path_str,
         file_size=file_size_str,
         file_type=file_ext,
-        ocr_status="pending",
+        ocr_status="done" if document_type == "scan" else "pending",
         status="pending",
         uploaded_by=current_user.email,
+        metadata_=_build_metadata(metadata_json, field_verification),
     )
     db.add(doc)
     db.commit()

@@ -2,14 +2,17 @@
 // Application Routes Configuration
 // ============================================================
 
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { ClientWorkspace } from "../components/client/components/ClientWorkspace";
 
-// Route path constants â€” keep in sync with constants/routes.ts
 const AppRoutes = () => {
   return (
     <Routes>
-      {/* TODO: Add route definitions during implementation */}
-      <Route path="/" element={<div>Dashboard</div>} />
+      <Route path="/" element={<Navigate to="/clients" replace />} />
+      {/* Client workspace — main document management UI */}
+      <Route path="/clients/:clientId/workspace" element={<ClientWorkspace />} />
+      {/* Fallback */}
+      <Route path="*" element={<div style={{ padding: "2rem", color: "#94a3b8" }}>Page not found</div>} />
     </Routes>
   );
 };
