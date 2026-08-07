@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     # ── File Upload ───────────────────────────────
     UPLOAD_DIR: str = "uploads"  # relative to backend/ directory
     MAX_UPLOAD_SIZE_MB: int = 20
-    ALLOWED_EXTENSIONS: str = "pdf,jpg,jpeg,png,webp,csv,xlsx,xls,json,xml,zip,docx"
+    ALLOWED_EXTENSIONS: str = (
+        "pdf,jpg,jpeg,png,webp,bmp,tiff,tif,gif,heic,heif,jfif,avif,"
+        "csv,xlsx,xls,ods,json,xml,zip,docx,doc,txt,ppt,pptx,msg,eml,"
+        "mp4,mov,avi,mkv,svg,html,htm"
+    )
 
     @property
     def allowed_extensions_set(self) -> set:

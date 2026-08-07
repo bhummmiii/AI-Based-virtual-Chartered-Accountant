@@ -127,12 +127,12 @@ export function UploadDocumentModal({ open, onOpenChange, category, clientId, on
                   <Upload className="size-7 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">Click to browse or drag & drop</p>
                   <p className="text-xs text-muted-foreground">
-                    Supported: {category.supported?.join(", ") ?? "PDF, Image, Excel, JSON, XML"}
+                    All formats accepted — PDF, Images (JPG, PNG, WEBP…), Excel, Word, CSV, JSON, XML, ZIP, etc.
                   </p>
                 </>
               )}
             </button>
-            <input ref={fileRef} type="file" hidden onChange={handleFile} />
+            <input ref={fileRef} type="file" hidden accept="*/*" onChange={handleFile} />
           </div>
         </div>
 
