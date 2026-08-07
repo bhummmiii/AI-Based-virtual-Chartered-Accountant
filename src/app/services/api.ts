@@ -53,10 +53,22 @@ async function request<T>(
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const message =
-      body?.detail ??
-      body?.message ??
-      `Request failed with status ${response.status}`;
+    // FastAPI 422 returns detail as an array of {loc, msg, type} objects
+    // All other errors return detail as a string
+    let message: string;
+    if (Array.isArray(body?.detail)) {
+      // Extract the human-readable msg from each validation error
+      message = body.detail
+        .map((e: { loc?: string[]; msg?: string }) =>
+          e.loc ? `${e.loc.slice(1).join(".")}: ${e.msg}` : e.msg ?? "Validation error"
+        )
+        .join(" | ");
+    } else {
+      message =
+        body?.detail ??
+        body?.message ??
+        `Request failed with status ${response.status}`;
+    }
     throw new ApiError(response.status, String(message), body);
   }
 

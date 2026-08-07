@@ -25,7 +25,7 @@ type AppState = {
   error: string | null;
   getClient: (id: string) => Client | undefined;
   refreshClients: () => Promise<void>;
-  addClient: (c: Omit<Client, "id" | "avatar" | "lastActivity">) => Promise<void>;
+  addClient: (c: Omit<Client, "id" | "avatar" | "lastActivity" | "audit" | "tax">) => Promise<void>;
   updateClient: (id: string, c: Partial<Client>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
 };
@@ -121,17 +121,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getClient = (id: string) => clients.find((c) => c.id === id);
 
   // ── Add client ─────────────────────────────────────────────
-  const addClient = async (c: Omit<Client, "id" | "avatar" | "lastActivity">) => {
+  const addClient = async (c: Omit<Client, "id" | "avatar" | "lastActivity" | "audit" | "tax">) => {
     try {
       const card = await clientService.create(c);
       const newClient = toClient(card);
-      // Register in dbIdMap for future update/delete
       dbIdMap.set(card.id, card.db_id);
       setClients((prev) => [newClient, ...prev]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to create client";
       toast.error("Failed to add client", { description: msg });
-      throw err; // re-throw so caller (Workspace) can handle
+      throw err;
     }
   };
 

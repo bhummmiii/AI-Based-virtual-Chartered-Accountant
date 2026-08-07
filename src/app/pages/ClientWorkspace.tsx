@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -18,10 +18,14 @@ import {
   TrendingDown,
   Wallet,
   ScanLine,
+  Trash2,
 } from "lucide-react";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { RiskIndicator } from "../components/client/RiskIndicator";
-import { ScanInvoiceDialog } from "../components/client/ScanInvoiceDialog";
+import { DocumentCategoryModal, type DocAction, type DocumentCategory } from "../components/client/DocumentCategoryModal";
+import { UploadDocumentModal } from "../components/client/UploadDocumentModal";
+import { ScanDocumentModal } from "../components/client/ScanDocumentModal";
+import { FilePreviewModal } from "../components/client/FilePreviewModal";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
@@ -30,14 +34,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Separator } from "../components/ui/separator";
 import { cn } from "../components/ui/utils";
 import { useApp } from "../context/AppContext";
+import { dbIdMap } from "../context/AppContext";
 import {
   currency,
   transactions,
   gstReturns,
-  clientInvoices,
-  clientDocuments,
-  clientHistory,
-  fraudIndicators,
   hsnCodes,
   aiSuggestions,
 } from "../data/mock";
@@ -69,7 +70,80 @@ export function ClientWorkspace() {
   const { getClient } = useApp();
   const client = getClient(clientId ?? "");
   const [tab, setTab] = useState("overview");
+  // ── Invoice modal state ────────────────────────────────────
+  const [docAction, setDocAction] = useState<DocAction>("upload");
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<DocumentCategory | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  // ── Uploaded documents list ────────────────────────────────
+  const [uploadedDocs, setUploadedDocs] = useState<any[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  // ── File preview state ─────────────────────────────────────
+  const [previewDoc, setPreviewDoc] = useState<{ id: string; fileName: string; fileType: string | null } | null>(null);
+
+  // Get the UUID db_id — must come after client guard so we compute it lazily
+  const clientDbId = client ? (dbIdMap.get(client.id) ?? "") : "";
+
+  const openCategoryModal = (action: DocAction) => {
+    setDocAction(action);
+    setCatModalOpen(true);
+  };
+
+  const handleCategorySelect = (cat: DocumentCategory) => {
+    setSelectedCategory(cat);
+    if (docAction === "upload") {
+      setUploadOpen(true);
+    } else {
+      setScanOpen(true);
+    }
+  };
+
+  // ── Fetch uploaded documents from backend ──────────────────
+  const fetchDocs = async () => {
+    if (!clientDbId) return;
+    setDocsLoading(true);
+    try {
+      const token = localStorage.getItem("ca_token");
+      const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
+      const res = await fetch(`${base}/invoices/${clientDbId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const body = await res.json();
+        setUploadedDocs(body.data ?? []);
+      }
+    } catch {
+      // silently ignore — table stays empty
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string) => {
+    const token = localStorage.getItem("ca_token");
+    const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
+    try {
+      await fetch(`${base}/invoices/document/${docId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      setUploadedDocs((prev) => prev.filter((d) => d.id !== docId));
+    } catch {
+      /* ignore */
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
+
+  // Fetch documents whenever the invoices tab is opened or clientDbId is available
+  useEffect(() => {
+    if (tab === "invoices" && clientDbId) {
+      fetchDocs();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, clientDbId]);
 
   if (!client) {
     return (
@@ -86,15 +160,12 @@ export function ClientWorkspace() {
   const profit = client.revenue - expenses;
 
   const tabs = [
-    { v: "overview", l: "Overview" },
-    { v: "accounting", l: "Accounting" },
-    { v: "gsttax", l: "GST & Tax" },
-    { v: "auditing", l: "Auditing" },
-    { v: "invoices", l: "Invoices" },
-    { v: "documents", l: "Documents" },
-    { v: "reports", l: "Reports" },
-    { v: "history", l: "History" },
-    { v: "insights", l: "AI Insights" },
+    { v: "overview",    l: "Overview" },
+    { v: "invoices",    l: "Invoices" },
+    { v: "accounting",  l: "Accounting" },
+    { v: "gsttax",      l: "GST" },
+    { v: "reports",     l: "Reports" },
+    { v: "insights",    l: "AI Insights" },
   ];
 
   return (
@@ -143,10 +214,8 @@ export function ClientWorkspace() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader><CardTitle>Compliance Snapshot</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-1">
                 <div className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">GST Filing</p><StatusBadge value={client.gst} className="mt-2" /></div>
-                <div className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">Audit</p><StatusBadge value={client.audit} className="mt-2" /></div>
-                <div className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">Tax Filing</p><StatusBadge value={client.tax} className="mt-2" /></div>
               </CardContent>
             </Card>
             <Card>
@@ -224,81 +293,84 @@ export function ClientWorkspace() {
           </Card>
         </TabsContent>
 
-        {/* Auditing */}
-        <TabsContent value="auditing" className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {fraudIndicators.map((f) => (
-              <Card key={f.label} className="p-4">
-                <p className="text-2xl leading-none tracking-tight">{f.value}</p>
-                <p className="mt-2 text-sm text-muted-foreground">{f.label}</p>
-                <StatusBadge value={f.severity === "danger" ? "Flagged" : "Review"} className="mt-2" />
-              </Card>
-            ))}
-          </div>
-          <Card>
-            <CardHeader><CardTitle>Audit Findings</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              {aiSuggestions.map((s) => {
-                const meta = sevMeta[s.severity as keyof typeof sevMeta];
-                return (
-                  <div key={s.id} className="flex items-start gap-2.5 rounded-lg border border-border p-3">
-                    <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", meta.cls)}><meta.icon className="size-3.5" /></span>
-                    <p className="text-sm text-muted-foreground">{s.text}</p>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* Invoices */}
         <TabsContent value="invoices" className="space-y-6">
           <Card>
             <CardHeader className="flex-row items-center justify-between">
               <CardTitle>Invoices & Bills</CardTitle>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setScanOpen(true)}><ScanLine className="size-4" /> Scan invoice</Button>
-                <Button variant="outline" size="sm"><Upload className="size-4" /> Upload invoice</Button>
+                <Button variant="outline" size="sm" onClick={() => openCategoryModal("scan")}><ScanLine className="size-4" /> Scan invoice</Button>
+                <Button variant="outline" size="sm" onClick={() => openCategoryModal("upload")}><Upload className="size-4" /> Upload invoice</Button>
               </div>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
-              <Table>
-                <TableHeader><TableRow><TableHead>Number</TableHead><TableHead>Date</TableHead><TableHead>Party</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Amount</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {clientInvoices.map((inv) => (
-                    <TableRow key={inv.id}>
-                      <TableCell className="font-mono">{inv.id}</TableCell>
-                      <TableCell className="text-muted-foreground">{inv.date}</TableCell>
-                      <TableCell>{inv.party}</TableCell>
-                      <TableCell className="text-muted-foreground">{inv.type}</TableCell>
-                      <TableCell className="text-right">{currency(inv.amount)}</TableCell>
-                      <TableCell><StatusBadge value={inv.status} /></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Documents */}
-        <TabsContent value="documents" className="space-y-6">
-          <Card>
-            <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>Documents</CardTitle>
-              <Button variant="outline" size="sm"><Upload className="size-4" /> Upload</Button>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {clientDocuments.map((d) => (
-                <div key={d.name} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground"><FileText className="size-5" /></span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{d.name}</p>
-                    <p className="text-xs text-muted-foreground">{d.type} · {d.size} · {d.date}</p>
-                  </div>
-                  <Button variant="ghost" size="icon"><Download className="size-4" /></Button>
+              {docsLoading ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">Loading documents…</div>
+              ) : uploadedDocs.length === 0 ? (
+                <div className="py-10 text-center text-sm text-muted-foreground">
+                  No documents yet. Use Scan or Upload to add one.
                 </div>
-              ))}
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Invoice #</TableHead>
+                      <TableHead>Vendor / Party</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>File</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {uploadedDocs.map((doc) => (
+                      <TableRow key={doc.id}>
+                        <TableCell className="text-xs text-muted-foreground capitalize">
+                          {doc.document_category?.replace(/_/g, " ")}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{doc.invoice_number ?? "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{doc.vendor ?? "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{doc.customer ?? "—"}</TableCell>
+                        <TableCell className="text-right">
+                          {doc.amount ? currency(Number(doc.amount)) : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{doc.document_type}</TableCell>
+                        <TableCell><StatusBadge value={doc.status ?? "pending"} /></TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {doc.file_name ? (
+                            <button
+                              type="button"
+                              onClick={() => setPreviewDoc({ id: doc.id, fileName: doc.file_name, fileType: doc.file_type })}
+                              className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-secondary hover:text-foreground transition-colors"
+                              title="Click to preview file"
+                            >
+                              <FileText className="size-3.5 text-primary" />
+                              <span className="truncate max-w-[80px] underline underline-offset-2">{doc.file_name}</span>
+                            </button>
+                          ) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {deletingDocId === doc.id ? (
+                            <span className="text-xs text-muted-foreground">Deleting…</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => { setDeletingDocId(doc.id); handleDeleteDoc(doc.id); }}
+                              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              title="Delete document"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -306,7 +378,7 @@ export function ClientWorkspace() {
         {/* Reports */}
         <TabsContent value="reports" className="space-y-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {["Balance Sheet", "Profit & Loss", "GST Summary", "Tax Computation", "Audit Report", "Cash Flow"].map((r) => (
+            {["Balance Sheet", "Profit & Loss", "GST Summary", "Cash Flow"].map((r) => (
               <Card key={r} className="p-5">
                 <div className="flex items-center gap-3">
                   <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><FileText className="size-5" /></span>
@@ -319,29 +391,6 @@ export function ClientWorkspace() {
               </Card>
             ))}
           </div>
-        </TabsContent>
-
-        {/* History */}
-        <TabsContent value="history" className="space-y-6">
-          <Card>
-            <CardHeader><CardTitle>Activity History</CardTitle></CardHeader>
-            <CardContent>
-              <div className="space-y-0">
-                {clientHistory.map((h, i) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <span className={cn("mt-1 size-2.5 shrink-0 rounded-full", h.type === "success" ? "bg-success" : "bg-info")} />
-                      {i < clientHistory.length - 1 && <span className="my-1 w-px flex-1 bg-border" />}
-                    </div>
-                    <div className="pb-5">
-                      <p className="text-sm">{h.event}</p>
-                      <p className="text-xs text-muted-foreground">{h.time}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         {/* AI Insights */}
@@ -367,7 +416,33 @@ export function ClientWorkspace() {
         </TabsContent>
       </Tabs>
 
-      <ScanInvoiceDialog open={scanOpen} onOpenChange={setScanOpen} />
+      <DocumentCategoryModal
+        open={catModalOpen}
+        onOpenChange={setCatModalOpen}
+        action={docAction}
+        onSelect={handleCategorySelect}
+      />
+      <UploadDocumentModal
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        category={selectedCategory}
+        clientId={clientDbId}
+        onSuccess={fetchDocs}
+      />
+      <ScanDocumentModal
+        open={scanOpen}
+        onOpenChange={setScanOpen}
+        category={selectedCategory}
+        clientId={clientDbId}
+        onSuccess={fetchDocs}
+      />
+      <FilePreviewModal
+        open={!!previewDoc}
+        onOpenChange={(o) => { if (!o) setPreviewDoc(null); }}
+        docId={previewDoc?.id ?? ""}
+        fileName={previewDoc?.fileName ?? ""}
+        fileType={previewDoc?.fileType ?? null}
+      />
     </>
   );
 }

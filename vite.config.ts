@@ -28,6 +28,8 @@ export default defineConfig({
     alias: {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
+      // react-router v8 merged react-router-dom into react-router (main index)
+      'react-router-dom': path.resolve(__dirname, 'node_modules/react-router/dist/production/index.js'),
     },
   },
 

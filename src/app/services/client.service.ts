@@ -145,7 +145,8 @@ export interface ClientDashboard {
 }
 
 // ── Create / Update payload shapes ───────────────────────────
-export type ClientCreatePayload = Omit<Client, "id" | "avatar" | "lastActivity">;
+/** audit and tax are auto-assigned by backend — never sent from the Add Client form. */
+export type ClientCreatePayload = Omit<Client, "id" | "avatar" | "lastActivity" | "audit" | "tax">;
 export type ClientUpdatePayload = Partial<ClientCreatePayload>;
 
 // ── Service ───────────────────────────────────────────────────

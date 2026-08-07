@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────
     LOG_LEVEL: str = "INFO"
 
+    # ── File Upload ───────────────────────────────
+    UPLOAD_DIR: str = "uploads"          # relative to backend/ directory
+    MAX_UPLOAD_SIZE_MB: int = 20
+    ALLOWED_EXTENSIONS: str = "pdf,jpg,jpeg,png,webp,csv,xlsx,xls,json,xml,zip,docx"
+
+    @property
+    def allowed_extensions_set(self) -> set:
+        return {ext.strip().lower() for ext in self.ALLOWED_EXTENSIONS.split(",")}
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

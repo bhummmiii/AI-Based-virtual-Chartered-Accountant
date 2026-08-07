@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Plus,
@@ -53,7 +53,7 @@ import { currency, type Client } from "../data/mock";
 
 export function Workspace() {
   const navigate = useNavigate();
-  const { clients, addClient, updateClient, deleteClient } = useApp();
+  const { clients, addClient, updateClient, deleteClient, refreshClients } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [query, setQuery] = useState("");
@@ -72,7 +72,10 @@ export function Workspace() {
         const matchesQ =
           c.company.toLowerCase().includes(q) ||
           c.name.toLowerCase().includes(q) ||
-          c.id.toLowerCase().includes(q);
+          c.id.toLowerCase().includes(q) ||
+          (c.gstin ?? "").toLowerCase().includes(q) ||
+          (c.emailAddress ?? "").toLowerCase().includes(q) ||
+          (c.location ?? "").toLowerCase().includes(q);
         const matchesStatus = status === "all" || c.status === status;
         const matchesRisk = risk === "all" || c.risk === risk;
         return matchesQ && matchesStatus && matchesRisk;
@@ -83,7 +86,7 @@ export function Workspace() {
   const openAdd = () => { setEditing(null); setFormOpen(true); };
   const openEdit = (c: Client) => { setEditing(c); setFormOpen(true); };
 
-  const handleSubmit = (draft: Omit<Client, "id" | "avatar" | "lastActivity">) => {
+  const handleSubmit = (draft: Omit<Client, "id" | "avatar" | "lastActivity" | "audit" | "tax">) => {
     if (editing) {
       updateClient(editing.id, draft);
       toast.success("Client updated", { description: draft.company });
@@ -94,8 +97,8 @@ export function Workspace() {
   };
 
   const handleExport = () => {
-    const headers = ["Client Code", "Company", "Contact", "Type", "GSTIN", "Revenue", "Status", "GST", "Audit", "Tax", "Risk"];
-    const rows = clients.map((c) => [c.id, c.company, c.name, c.type, c.gstin, c.revenue, c.status, c.gst, c.audit, c.tax, c.risk]);
+    const headers = ["Client Code", "Company", "Contact", "Type", "GSTIN", "Revenue", "Status", "GST", "Risk"];
+    const rows = clients.map((c) => [c.id, c.company, c.name, c.type, c.gstin, c.revenue, c.status, c.gst, c.risk]);
     const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -106,11 +109,137 @@ export function Workspace() {
     toast.success("Clients exported", { description: `${clients.length} records → clients.csv` });
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) toast.success("Import started", { description: `Parsing ${file.name}…` });
     e.target.value = "";
-  };
+    if (!file) return;
+
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const supported = ["csv", "xlsx", "xls"];
+    if (!supported.includes(ext)) {
+      toast.error("Unsupported file type", {
+        description: `Please import a CSV or Excel file (.csv, .xlsx, .xls).`,
+      });
+      return;
+    }
+
+    toast.info("Importing…", { description: `Parsing ${file.name}` });
+
+    try {
+      // ── Parse file into rows (string[][]) using SheetJS ──────────────
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      // defval:"" ensures empty cells become "" not undefined
+      const raw: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as string[][];
+
+      if (raw.length < 2) {
+        toast.error("Import failed", { description: "File is empty or has no data rows." });
+        return;
+      }
+
+      // ── Normalise header ─────────────────────────────────────────────
+      const rawHeader = raw[0].map(String);
+      const header = rawHeader.map((h) =>
+        h.toLowerCase().trim().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")
+      );
+
+      // Fuzzy column finder — exact first, then partial match
+      const idx = (name: string): number => {
+        const exact = header.indexOf(name);
+        if (exact !== -1) return exact;
+        return header.findIndex((h) => h.includes(name));
+      };
+
+      const co      = idx("company");
+      const contact = idx("contact");
+      const type    = idx("type");
+      const gstin   = idx("gstin");
+      const rev     = idx("revenue");
+      const stat    = idx("status");
+      const gst     = idx("gst");
+      const risk    = idx("risk");
+
+      if (co === -1) {
+        toast.error("Import failed", {
+          description: `Could not find "Company" column. Headers found: ${rawHeader.slice(0, 6).join(", ")}`,
+        });
+        return;
+      }
+
+      // ── Value coercion helpers ───────────────────────────────────────
+      const VALID_TYPES  = ["Company", "Individual", "LLP", "Partnership"] as const;
+      const VALID_STATUS = ["Active", "Review", "Inactive"] as const;
+      const VALID_GST    = ["Filed", "Due", "Overdue"] as const;
+      const VALID_RISK   = ["Low", "Medium", "High"] as const;
+
+      const coerce = <T extends string>(val: string, valid: readonly T[], fallback: T): T =>
+        (valid as readonly string[]).includes(val) ? (val as T) : fallback;
+
+      const cell = (row: string[], i: number) =>
+        i >= 0 ? String(row[i] ?? "").trim() : "";
+
+      // ── Process rows ─────────────────────────────────────────────────
+      let imported = 0;
+      let skipped  = 0;
+      const errors: string[] = [];
+
+      for (let i = 1; i < raw.length; i++) {
+        const row = raw[i].map(String);
+        if (row.every((c) => !c.trim())) continue; // blank row
+
+        const company = cell(row, co);
+        if (!company) { skipped++; continue; }
+
+        try {
+          await addClient({
+            company,
+            name:          cell(row, contact) || "—",
+            type:          coerce(cell(row, type),   VALID_TYPES,  "Company"),
+            gstin:         cell(row, gstin),
+            revenue:       parseFloat(cell(row, rev).replace(/[^0-9.]/g, "") || "0") || 0,
+            status:        coerce(cell(row, stat),   VALID_STATUS, "Active"),
+            gst:           coerce(cell(row, gst),    VALID_GST,    "Filed"),
+            risk:          coerce(cell(row, risk),   VALID_RISK,   "Low"),
+            clientType:    "Monthly",
+            contactNumber: "",
+            emailAddress:  "",
+            location:      "",
+          });
+          imported++;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.toLowerCase().includes("already exists")) {
+            errors.push(`Row ${i + 1} (${company}): ${msg}`);
+          } else {
+            skipped++;
+          }
+        }
+      }
+
+      await refreshClients();
+
+      if (imported > 0) {
+        toast.success("Import complete", {
+          description: `${imported} client${imported > 1 ? "s" : ""} added${skipped ? `, ${skipped} skipped` : ""}.`,
+        });
+      } else if (skipped > 0) {
+        toast.warning("Nothing new imported", {
+          description: `${skipped} row${skipped > 1 ? "s" : ""} were duplicates or blank.`,
+        });
+      }
+      if (errors.length) {
+        toast.error(`${errors.length} row${errors.length > 1 ? "s" : ""} failed`, {
+          description: errors.slice(0, 3).join("\n"),
+        });
+      }
+    } catch (err: unknown) {
+      toast.error("Import failed", {
+        description: err instanceof Error ? err.message : "Could not read the file.",
+      });
+    }
+  }, [addClient, refreshClients]);
 
   return (
     <>
@@ -119,7 +248,7 @@ export function Workspace() {
         subtitle="Manage all your client files in one place"
         actions={
           <>
-            <input ref={fileRef} type="file" accept=".csv,.xlsx" hidden onChange={handleImport} />
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" hidden onChange={handleImport} />
             <Button variant="outline" onClick={() => fileRef.current?.click()}><Upload className="size-4" /> Import</Button>
             <Button variant="outline" onClick={handleExport}><Download className="size-4" /> Export</Button>
             <Button onClick={openAdd}><Plus className="size-4" /> Add Client</Button>
@@ -198,18 +327,10 @@ export function Workspace() {
                 {c.name} · {c.type}
               </div>
 
-              <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="mt-4 grid grid-cols-1 gap-2">
                 <div className="rounded-lg bg-secondary/50 p-2 text-center">
                   <p className="text-xs text-muted-foreground">GST</p>
                   <StatusBadge value={c.gst} className="mt-1" />
-                </div>
-                <div className="rounded-lg bg-secondary/50 p-2 text-center">
-                  <p className="text-xs text-muted-foreground">Audit</p>
-                  <StatusBadge value={c.audit} className="mt-1" />
-                </div>
-                <div className="rounded-lg bg-secondary/50 p-2 text-center">
-                  <p className="text-xs text-muted-foreground">Tax</p>
-                  <StatusBadge value={c.tax} className="mt-1" />
                 </div>
               </div>
 
@@ -230,8 +351,6 @@ export function Workspace() {
                   <TableHead>Code</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead>GST</TableHead>
-                  <TableHead>Audit</TableHead>
-                  <TableHead>Tax</TableHead>
                   <TableHead>Risk</TableHead>
                   <TableHead>Last activity</TableHead>
                   <TableHead className="w-10" />
@@ -249,8 +368,6 @@ export function Workspace() {
                     <TableCell className="text-muted-foreground">{c.id}</TableCell>
                     <TableCell className="text-muted-foreground">{c.name}</TableCell>
                     <TableCell><StatusBadge value={c.gst} /></TableCell>
-                    <TableCell><StatusBadge value={c.audit} /></TableCell>
-                    <TableCell><StatusBadge value={c.tax} /></TableCell>
                     <TableCell><RiskIndicator level={c.risk} showLabel={false} /></TableCell>
                     <TableCell className="text-muted-foreground">{c.lastActivity}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>

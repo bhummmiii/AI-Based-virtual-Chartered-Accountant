@@ -14,6 +14,7 @@ from app.database.session import engine, Base
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.api.auth_router import router as auth_router
 from app.api.client_router import router as client_router
+from app.api.invoice_router import router as invoice_router
 
 # Register all 10 models with Base.metadata
 import app.models  # noqa: F401
@@ -89,3 +90,4 @@ async def root():
 # ── API Routers ───────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(client_router, prefix="/api/v1/clients", tags=["Clients"])
+app.include_router(invoice_router, prefix="/api/v1/invoices", tags=["Invoices"])

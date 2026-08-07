@@ -71,6 +71,11 @@ export type Client = {
   risk: "Low" | "Medium" | "High";
   lastActivity: string;
   avatar: string;
+  // Extended fields (stored in DB, not shown on workspace cards)
+  clientType?: "Monthly" | "Quarterly";
+  contactNumber?: string;
+  emailAddress?: string;
+  location?: string;
 };
 
 export const clients: Client[] = [

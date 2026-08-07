@@ -101,6 +101,11 @@ class ClientService:
             country=data.country or "India",
             status=S_FE2DB.get(data.status, "active"),
             risk_level=R_FE2DB.get(data.risk, "low"),
+            # new fields
+            billing_cycle=data.clientType.lower() if data.clientType else "monthly",
+            contact_number=data.contactNumber,
+            email_address=data.emailAddress,
+            location=data.location,
         )
         client = self.repo.create(client)
 
@@ -115,20 +120,20 @@ class ClientService:
             filing_status=G_FE2DB.get(data.gst, "pending"),
             due_date=date.today() + timedelta(days=20),
         ))
-        # Seed initial Tax record
+        # Seed initial Tax record — status always "pending" until GST module updates it
         self.repo.db.add(TaxRecord(
             client_id=client.id,
             financial_year="2025-26",
             tax_type="income_tax",
             taxable_income=Decimal(str(data.revenue)),
             tds=Decimal("0"), advance_tax=Decimal("0"), total_tax=Decimal("0"),
-            status=G_FE2DB.get(data.tax, "pending"),
+            status="pending",
         ))
-        # Seed initial Audit report
+        # Seed initial Audit report — status always "pending" until Auditing module updates it
         self.repo.db.add(AuditReport(
             client_id=client.id,
             audit_type="statutory",
-            audit_status=A_FE2DB.get(data.audit, "pending"),
+            audit_status="pending",
             findings="Initial audit record — client onboarded.",
             recommendations="Complete KYC and submit first year documents.",
         ))
@@ -137,8 +142,8 @@ class ClientService:
         logger.info("Created client %s — %s", client.client_code, client.company_name)
         return self._card(client,
                           G_FE2DB.get(data.gst, "pending"),
-                          G_FE2DB.get(data.tax, "pending"),
-                          A_FE2DB.get(data.audit, "pending"))
+                          "pending",   # tax — always Pending on creation; GST module updates later
+                          "pending")   # audit — always Pending on creation; Auditing module updates later
 
     # ── LIST ───────────────────────────────────────────────────
     def get_clients(self, page=1, page_size=50, search=None,
@@ -217,6 +222,11 @@ class ClientService:
         if data.city     is not None: patch["city"] = data.city
         if data.state    is not None: patch["state"] = data.state
         if data.country  is not None: patch["country"] = data.country
+        # new fields
+        if data.clientType     is not None: patch["billing_cycle"]  = data.clientType.lower()
+        if data.contactNumber  is not None: patch["contact_number"] = data.contactNumber
+        if data.emailAddress   is not None: patch["email_address"]  = data.emailAddress
+        if data.location       is not None: patch["location"]       = data.location
         client = self.repo.update(client, patch)
         return self._card(client,
                           self.repo.get_latest_gst_status(client.id),
@@ -284,6 +294,10 @@ class ClientService:
         return c
 
     def _card(self, client: Client, gst_s, tax_s, audit_s) -> ClientCardResponse:
+        # GST status uses G_DB2FE: "filed"→"Filed", "pending"→"Due", "overdue"→"Overdue"
+        # Tax/Audit use A_DB2FE: "pending"→"Pending", "completed"→"Passed", etc.
+        # This keeps the workspace card consistent with what future modules will update.
+        TAX_DB2FE = {"filed": "Filed", "pending": "Pending", "overdue": "Overdue", "exempt": "Filed", None: "Pending"}
         return ClientCardResponse(
             id=client.client_code,
             name=client.contact_person,
@@ -294,7 +308,7 @@ class ClientService:
             status=S_DB2FE.get(client.status, "Active"),
             gst=G_DB2FE.get(gst_s, "Pending"),
             audit=A_DB2FE.get(audit_s, "Pending"),
-            tax=G_DB2FE.get(tax_s, "Pending"),
+            tax=TAX_DB2FE.get(tax_s, "Pending"),
             risk=R_DB2FE.get(client.risk_level, "Low"),
             lastActivity=_rel_time(client.updated_at),
             avatar=_initials(client.company_name),

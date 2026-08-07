@@ -30,24 +30,33 @@ PAN_RE   = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
 
 # ── Create ────────────────────────────────────────────────────
 class ClientCreate(BaseModel):
-    company:  str   = Field(..., min_length=1, max_length=255)
-    name:     str   = Field(..., min_length=1, max_length=255)
-    type:     str   = Field(default="Company")
-    gstin:    Optional[str] = None
-    revenue:  float = Field(default=0.0, ge=0)
-    status:   str   = Field(default="Active")
-    gst:      str   = Field(default="Filed")
-    audit:    str   = Field(default="Pending")
-    tax:      str   = Field(default="Filed")
-    risk:     str   = Field(default="Low")
-    pan:      Optional[str] = None
-    email:    Optional[str] = None
-    phone:    Optional[str] = None
-    address:  Optional[str] = None
-    city:     Optional[str] = None
-    state:    Optional[str] = None
-    country:  Optional[str] = Field(default="India")
-    industry: Optional[str] = None
+    """
+    Payload for creating a new client.
+    audit and tax are NOT accepted from frontend — backend assigns
+    "pending" automatically. Future Auditing/GST modules will update them.
+    """
+    company:        str   = Field(..., min_length=1, max_length=255)
+    name:           str   = Field(..., min_length=1, max_length=255)
+    type:           str   = Field(default="Company")
+    gstin:          Optional[str] = None
+    revenue:        float = Field(default=0.0, ge=0)
+    status:         str   = Field(default="Active")
+    gst:            str   = Field(default="Filed")
+    # audit and tax intentionally removed — hardcoded to "Pending" in service
+    risk:           str   = Field(default="Low")
+    pan:            Optional[str] = None
+    email:          Optional[str] = None
+    phone:          Optional[str] = None
+    address:        Optional[str] = None
+    city:           Optional[str] = None
+    state:          Optional[str] = None
+    country:        Optional[str] = Field(default="India")
+    industry:       Optional[str] = None
+    # ── Extended fields ──────────────────────────────────────
+    clientType:     Optional[str] = Field(default="Monthly", description="Monthly | Quarterly")
+    contactNumber:  Optional[str] = Field(default=None, description="Mobile number (10–15 digits)")
+    emailAddress:   Optional[str] = Field(default=None, description="Client email address")
+    location:       Optional[str] = Field(default=None, description="City, State")
 
     @field_validator("gstin")
     @classmethod
@@ -77,24 +86,29 @@ class ClientCreate(BaseModel):
 
 # ── Update ────────────────────────────────────────────────────
 class ClientUpdate(BaseModel):
-    company:  Optional[str]   = Field(default=None, min_length=1, max_length=255)
-    name:     Optional[str]   = Field(default=None, min_length=1, max_length=255)
-    type:     Optional[str]   = None
-    gstin:    Optional[str]   = None
-    revenue:  Optional[float] = Field(default=None, ge=0)
-    status:   Optional[str]   = None
-    gst:      Optional[str]   = None
-    audit:    Optional[str]   = None
-    tax:      Optional[str]   = None
-    risk:     Optional[str]   = None
-    pan:      Optional[str]   = None
-    email:    Optional[str]   = None
-    phone:    Optional[str]   = None
-    address:  Optional[str]   = None
-    city:     Optional[str]   = None
-    state:    Optional[str]   = None
-    country:  Optional[str]   = None
-    industry: Optional[str]   = None
+    company:        Optional[str]   = Field(default=None, min_length=1, max_length=255)
+    name:           Optional[str]   = Field(default=None, min_length=1, max_length=255)
+    type:           Optional[str]   = None
+    gstin:          Optional[str]   = None
+    revenue:        Optional[float] = Field(default=None, ge=0)
+    status:         Optional[str]   = None
+    gst:            Optional[str]   = None
+    audit:          Optional[str]   = None
+    tax:            Optional[str]   = None
+    risk:           Optional[str]   = None
+    pan:            Optional[str]   = None
+    email:          Optional[str]   = None
+    phone:          Optional[str]   = None
+    address:        Optional[str]   = None
+    city:           Optional[str]   = None
+    state:          Optional[str]   = None
+    country:        Optional[str]   = None
+    industry:       Optional[str]   = None
+    # ── New fields ──────────────────────────────────────────
+    clientType:     Optional[str]   = None
+    contactNumber:  Optional[str]   = None
+    emailAddress:   Optional[str]   = None
+    location:       Optional[str]   = None
 
     @field_validator("gstin")
     @classmethod
@@ -153,6 +167,11 @@ class ClientResponse(BaseModel):
     industry:       Optional[str] = None
     risk_level:     str
     status:         str
+    # ── New fields ──────────────────────────────────────────
+    billing_cycle:  Optional[str] = None
+    contact_number: Optional[str] = None
+    email_address:  Optional[str] = None
+    location:       Optional[str] = None
     created_at:     datetime
     updated_at:     datetime
 
