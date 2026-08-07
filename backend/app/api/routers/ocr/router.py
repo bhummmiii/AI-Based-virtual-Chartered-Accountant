@@ -5,6 +5,7 @@ POST /api/v1/ocr/extract  — upload any image/PDF, return extracted key-value f
 
 import io
 import re
+import os
 import logging
 from typing import Optional
 
@@ -12,6 +13,21 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Configure Tesseract path (Windows default install location)
+# pytesseract will use this if tesseract.exe is not already in the system PATH
+# ---------------------------------------------------------------------------
+_TESSERACT_WINDOWS_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+try:
+    import pytesseract
+
+    # Only set the path if it hasn't been found on PATH already
+    if os.name == "nt" and os.path.isfile(_TESSERACT_WINDOWS_PATH):
+        pytesseract.pytesseract.tesseract_cmd = _TESSERACT_WINDOWS_PATH
+except ImportError:
+    pass  # handled lazily inside _ocr_image
 
 # ---------------------------------------------------------------------------
 # Helpers
