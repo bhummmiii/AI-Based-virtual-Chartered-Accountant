@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────
     LOG_LEVEL: str = "INFO"
 
+    # ── AI / Gemini ───────────────────────────────
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-flash-lite-latest"
+
     # ── File Upload ───────────────────────────────
     UPLOAD_DIR: str = "uploads"  # relative to backend/ directory
     MAX_UPLOAD_SIZE_MB: int = 20
@@ -55,13 +59,26 @@ class Settings(BaseSettings):
     def allowed_extensions_set(self) -> set:
         return {ext.strip().lower() for ext in self.ALLOWED_EXTENSIONS.split(",")}
 
+    # ── Statutory GST & Accounting Constants ───────
+    ROUNDING_TOLERANCE: float = 1.00  # R4: 1.00 rupee round-off tolerance
+    B2C_LARGE_THRESHOLD: float = 100000.00  # C4: Notification 12/2024-CT (effective 1 Aug 2024)
+    ENABLE_GSTIN_CHECKSUM_VALIDATION: bool = False  # C6: Checksum flag (default OFF for test environments)
+    STATUTORY_DUE_DATES: dict = {
+        "monthly": {"GSTR-1": 11, "GSTR-3B": 20},
+        "quarterly": {"GSTR-1": 13, "GSTR-3B": 22},
+    }
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Cached singleton for application settings."""
     return Settings()
+
+
+settings = get_settings()
