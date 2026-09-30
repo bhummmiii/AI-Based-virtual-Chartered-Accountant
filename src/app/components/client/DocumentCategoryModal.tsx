@@ -133,6 +133,10 @@ export function DocumentCategoryModal({ open, onOpenChange, action, onSelect }: 
   const title = action === "upload" ? "Upload Document" : "Scan Document";
   const subtitle = "Choose the type of document you want to " + (action === "upload" ? "upload." : "scan.");
 
+  const categories = action === "scan"
+    ? DOCUMENT_CATEGORIES.filter((cat) => cat.id !== "document_list")
+    : DOCUMENT_CATEGORIES;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -142,7 +146,7 @@ export function DocumentCategoryModal({ open, onOpenChange, action, onSelect }: 
         </DialogHeader>
 
         <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-2">
-          {DOCUMENT_CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <button
               key={cat.id}
               type="button"

@@ -21,6 +21,14 @@ class UserRegister(BaseModel):
     role: str = Field(default="ca", pattern="^(ca|admin|staff)$")
 
 
+class GoogleAuthRequest(BaseModel):
+    email: EmailStr
+    password: Optional[str] = None
+    name: Optional[str] = None
+    google_id: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+
 class UserResponse(BaseModel):
     id: uuid.UUID
     full_name: str

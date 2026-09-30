@@ -16,7 +16,11 @@ from app.api.auth_router import router as auth_router
 from app.api.client_router import router as client_router
 from app.api.invoice_router import router as invoice_router
 from app.api.routers.ocr.router import router as ocr_router
-
+from app.api.routers.gst.router import router as gst_router
+from app.api.routers.accounting.router import router as accounting_router
+from app.api.routers.tax.router import router as tax_router
+from app.api.routers.reports.router import router as reports_router
+from app.api.routers.chatbot.router import router as chatbot_router
 # Register all 10 models with Base.metadata
 import app.models  # noqa: F401
 
@@ -97,3 +101,8 @@ app.include_router(auth_router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(client_router, prefix="/api/v1/clients", tags=["Clients"])
 app.include_router(invoice_router, prefix="/api/v1/invoices", tags=["Invoices"])
 app.include_router(ocr_router, prefix="/api/v1/ocr", tags=["OCR"])
+app.include_router(gst_router, prefix="/api/v1/gst", tags=["GST"])
+app.include_router(accounting_router, prefix="/api/v1/accounting", tags=["Accounting"])
+app.include_router(tax_router, prefix="/api/v1/tax", tags=["Tax"])
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
+app.include_router(chatbot_router, prefix="/api/v1/chatbot", tags=["Chatbot"])

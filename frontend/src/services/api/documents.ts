@@ -44,7 +44,7 @@ export async function uploadDocument(
     if (val instanceof File) {
       fd.append("file", val);
     } else {
-      fd.append(key, String(val));
+      fd.append(String(key), String(val));
     }
   });
 
@@ -101,7 +101,7 @@ export async function ocrExtract(
   const res = await apiClient.post<OcrExtractResponse>(
     `${OCR_BASE}/extract`,
     fd,
-    { headers: { "Content-Type": "multipart/form-data" }, timeout: 60000 }
+    { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 }
   );
   return res.data;
 }

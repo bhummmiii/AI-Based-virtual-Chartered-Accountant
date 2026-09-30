@@ -1,0 +1,10 @@
+code,type,description,gst_rate_percent,cgst,sgst,igst
+9401,HSN,Seats and chairs (office chair),18,9.0,9.0,18
+9403,HSN,Other furniture (office furniture set),18,9.0,9.0,18
+8471,HSN,Computers / laptops,18,9.0,9.0,18
+4820,HSN,"Notebooks, registers, stationery",5,2.5,2.5,5
+4202,HSN,"Trunks, suitcases, travel bags",18,9.0,9.0,18
+7208,HSN,Flat-rolled iron/steel sheets,18,9.0,9.0,18
+998314,SAC,IT software development services,18,9.0,9.0,18
+996331,SAC,Food / catering services,5,2.5,2.5,5
+998211,SAC,Legal advisory services (RCM if from advocate),18,9.0,9.0,18

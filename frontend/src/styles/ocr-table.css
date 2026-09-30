@@ -1,0 +1,281 @@
+/* ============================================================ */
+/* OCR Table Preview — Task 2.5                                 */
+/* ============================================================ */
+.ocr-table-preview {
+  margin: 0.75rem 0 1rem;
+  border: 1px solid rgba(139,92,246,0.25);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(139,92,246,0.04);
+}
+.ocr-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: rgba(139,92,246,0.1);
+  border-bottom: 1px solid rgba(139,92,246,0.18);
+}
+.ocr-table-title { font-weight: 700; font-size: 0.88rem; color: #c4b5fd; }
+.ocr-table-count { font-size: 0.78rem; color: var(--ws-text-muted); }
+.ocr-table-scroll { overflow-x: auto; max-height: 280px; overflow-y: auto; }
+.ocr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  min-width: 600px;
+}
+.ocr-th {
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a78bfa;
+  background: rgba(139,92,246,0.08);
+  border-bottom: 1px solid rgba(139,92,246,0.15);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+.ocr-td {
+  padding: 0.38rem 0.75rem;
+  color: var(--ws-text);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  white-space: nowrap;
+}
+.ocr-tr-even { background: transparent; }
+.ocr-tr-odd  { background: rgba(255,255,255,0.02); }
+.ocr-table-more {
+  padding: 0.45rem 1rem;
+  font-size: 0.75rem;
+  color: var(--ws-text-muted);
+  border-top: 1px solid rgba(255,255,255,0.05);
+  margin: 0;
+}
+
+/* ============================================================ */
+/* Extraction Method Banner                                      */
+/* ============================================================ */
+.extraction-method-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  margin-bottom: 0.65rem;
+  background: rgba(56,189,248,0.07);
+  border: 1px solid rgba(56,189,248,0.18);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+.em-label { font-weight: 700; color: #7dd3fc; }
+.em-value  { color: var(--ws-text-muted); }
+.em-sep    { color: rgba(255,255,255,0.2); }
+.em-table  { color: #c4b5fd; font-weight: 600; }
+
+/* ============================================================ */
+/* OCR Fields Section Header                                    */
+/* ============================================================ */
+.ocr-fields-section { margin-top: 0.75rem; }
+.ocr-fields-section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ws-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+.cs-table { color: #c4b5fd; }
+
+/* ============================================================ */
+/* No-content Warning                                           */
+/* ============================================================ */
+.ocr-no-content {
+  padding: 1rem;
+  text-align: center;
+  color: var(--ws-text-muted);
+  font-size: 0.85rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px dashed rgba(255,255,255,0.1);
+  margin: 0.75rem 0;
+}
+
+/* ============================================================ */
+/* Multi-record — scan modal sizing                             */
+/* ============================================================ */
+.scan-modal--multi {
+  max-width: 780px;
+  width: 95vw;
+}
+.modal-subtitle {
+  font-size: 0.78rem;
+  color: #c4b5fd;
+  margin: 0;
+  font-weight: 500;
+}
+.scan-review-body--multi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ============================================================ */
+/* Record Cards — accordion list                                 */
+/* ============================================================ */
+.record-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.record-card {
+  border: 1px solid rgba(139,92,246,0.2);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  transition: border-color 0.2s;
+  overflow: hidden;
+}
+.record-card--open {
+  border-color: rgba(139,92,246,0.45);
+}
+.record-card--saved {
+  border-color: rgba(52,211,153,0.45);
+  background: rgba(52,211,153,0.04);
+}
+.record-card--error {
+  border-color: rgba(248,113,113,0.45);
+  background: rgba(248,113,113,0.03);
+}
+
+/* Card clickable header row */
+.record-card-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ws-text);
+  transition: background 0.15s;
+  gap: 0.75rem;
+}
+.record-card-header:hover { background: rgba(139,92,246,0.07); }
+
+.rc-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+.rc-num {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #a78bfa;
+  background: rgba(139,92,246,0.15);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.rc-title-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.rc-inv-num {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ws-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.rc-party {
+  font-size: 0.74rem;
+  color: var(--ws-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.rc-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.rc-amount {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #4ade80;
+}
+.rc-items-badge {
+  font-size: 0.72rem;
+  background: rgba(139,92,246,0.15);
+  color: #c4b5fd;
+  padding: 0.12rem 0.42rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.rc-chevron {
+  font-size: 0.7rem;
+  color: var(--ws-text-muted);
+  transition: transform 0.2s;
+}
+.rc-status-saved {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #4ade80;
+}
+.rc-status-error {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #f87171;
+}
+
+/* Card expanded body */
+.record-card-body {
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  animation: rcSlideDown 0.18s ease;
+}
+@keyframes rcSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================ */
+/* Multi-record save progress bar                                */
+/* ============================================================ */
+.multi-save-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
+}
+.msp-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.msp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #4ade80);
+  border-radius: 6px;
+  transition: width 0.35s ease;
+}
+.msp-label {
+  font-size: 0.77rem;
+  color: var(--ws-text-muted);
+  white-space: nowrap;
+}

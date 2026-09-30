@@ -122,27 +122,28 @@ class ClientService:
         self.repo = ClientRepository(db)
 
     # ── CREATE ─────────────────────────────────────────────────
-    def create_client(self, data: ClientCreate) -> ClientCardResponse:
-        # Duplicate checks
-        ex = self.repo.get_by_company_name(data.company)
+    def create_client(self, data: ClientCreate, user_id: Optional[object] = None) -> ClientCardResponse:
+        # Duplicate checks scoped to this user
+        ex = self.repo.get_by_company_name(data.company, user_id=user_id)
         if ex and ex.status != "deleted":
             raise ConflictException(
                 detail=f"'{data.company}' already exists ({ex.client_code})"
             )
         if data.gstin:
-            dup = self.repo.get_by_gst(data.gstin)
+            dup = self.repo.get_by_gst(data.gstin, user_id=user_id)
             if dup and dup.status != "deleted":
                 raise ConflictException(
                     detail=f"GSTIN {data.gstin} belongs to {dup.company_name}"
                 )
         if data.pan:
-            dup = self.repo.get_by_pan(data.pan)
+            dup = self.repo.get_by_pan(data.pan, user_id=user_id)
             if dup and dup.status != "deleted":
                 raise ConflictException(
                     detail=f"PAN {data.pan} belongs to {dup.company_name}"
                 )
 
         client = Client(
+            user_id=user_id,
             client_code=_next_code(self.repo),
             company_name=data.company.strip(),
             contact_person=data.name.strip(),
@@ -205,7 +206,7 @@ class ClientService:
         )
         self.repo.db.commit()
 
-        logger.info("Created client %s — %s", client.client_code, client.company_name)
+        logger.info("Created client %s — %s for user %s", client.client_code, client.company_name, user_id)
         return self._card(
             client,
             G_FE2DB.get(data.gst, "pending"),
@@ -223,6 +224,7 @@ class ClientService:
         sort_order="desc",
         status=None,
         risk_level=None,
+        user_id: Optional[object] = None,
     ) -> PaginatedResponse:
         db_status = S_FE2DB.get(status, status.lower() if status else None)
         db_risk = R_FE2DB.get(risk_level, risk_level.lower() if risk_level else None)
@@ -237,6 +239,7 @@ class ClientService:
             sort_order=sort_order,
             status_filter=db_status,
             risk_filter=db_risk,
+            user_id=user_id,
         )
         cards = [
             self._card(
@@ -256,8 +259,8 @@ class ClientService:
         )
 
     # ── DASHBOARD ──────────────────────────────────────────────
-    def get_client_dashboard(self, client_id) -> ClientDashboardResponse:
-        client = self.repo.get_full_dashboard(client_id)
+    def get_client_dashboard(self, client_id, user_id: Optional[object] = None) -> ClientDashboardResponse:
+        client = self.repo.get_full_dashboard(client_id, user_id=user_id)
         if not client or client.status == "deleted":
             raise NotFoundException(detail=f"Client {client_id} not found")
         return ClientDashboardResponse(
@@ -274,8 +277,8 @@ class ClientService:
         )
 
     # ── OVERVIEW ───────────────────────────────────────────────
-    def get_client_overview(self, client_id) -> ClientOverviewResponse:
-        client = self._get_or_404(client_id)
+    def get_client_overview(self, client_id, user_id: Optional[object] = None) -> ClientOverviewResponse:
+        client = self._get_or_404(client_id, user_id=user_id)
         return ClientOverviewResponse(
             client_id=str(client.id),
             company_name=client.company_name,
@@ -297,11 +300,11 @@ class ClientService:
         )
 
     # ── UPDATE ─────────────────────────────────────────────────
-    def update_client(self, client_id, data: ClientUpdate) -> ClientCardResponse:
-        client = self._get_or_404(client_id)
+    def update_client(self, client_id, data: ClientUpdate, user_id: Optional[object] = None) -> ClientCardResponse:
+        client = self._get_or_404(client_id, user_id=user_id)
         patch = {}
         if data.company is not None:
-            ex = self.repo.get_by_company_name(data.company)
+            ex = self.repo.get_by_company_name(data.company, user_id=user_id)
             if ex and str(ex.id) != str(client_id) and ex.status != "deleted":
                 raise ConflictException(detail=f"'{data.company}' already exists")
             patch["company_name"] = data.company.strip()
@@ -347,43 +350,43 @@ class ClientService:
         )
 
     # ── DELETE ─────────────────────────────────────────────────
-    def delete_client(self, client_id) -> dict:
-        client = self._get_or_404(client_id)
+    def delete_client(self, client_id, user_id: Optional[object] = None) -> dict:
+        client = self._get_or_404(client_id, user_id=user_id)
         self.repo.soft_delete(client)
         return {"message": f"Client {client.client_code} deleted"}
 
     # ── SUB-SECTIONS ───────────────────────────────────────────
-    def get_gst_records(self, cid):
-        self._get_or_404(cid)
+    def get_gst_records(self, cid, user_id: Optional[object] = None):
+        self._get_or_404(cid, user_id=user_id)
         return [
             GSTRecordResponse.model_validate(r) for r in self.repo.get_gst_records(cid)
         ]
 
-    def get_tax_records(self, cid):
-        self._get_or_404(cid)
+    def get_tax_records(self, cid, user_id: Optional[object] = None):
+        self._get_or_404(cid, user_id=user_id)
         return [
             TaxRecordResponse.model_validate(r) for r in self.repo.get_tax_records(cid)
         ]
 
-    def get_audit_reports(self, cid):
-        self._get_or_404(cid)
+    def get_audit_reports(self, cid, user_id: Optional[object] = None):
+        self._get_or_404(cid, user_id=user_id)
         return [
             AuditReportResponse.model_validate(r)
             for r in self.repo.get_audit_reports(cid)
         ]
 
-    def get_invoices(self, cid):
-        self._get_or_404(cid)
+    def get_invoices(self, cid, user_id: Optional[object] = None):
+        self._get_or_404(cid, user_id=user_id)
         return [InvoiceResponse.model_validate(r) for r in self.repo.get_invoices(cid)]
 
-    def get_documents(self, cid):
-        self._get_or_404(cid)
+    def get_documents(self, cid, user_id: Optional[object] = None):
+        self._get_or_404(cid, user_id=user_id)
         return [
             DocumentResponse.model_validate(r) for r in self.repo.get_documents(cid)
         ]
 
-    def get_history(self, cid) -> ClientHistoryResponse:
-        self._get_or_404(cid)
+    def get_history(self, cid, user_id: Optional[object] = None) -> ClientHistoryResponse:
+        self._get_or_404(cid, user_id=user_id)
         items: List[ActivityItem] = []
         for r in self.repo.get_gst_records(cid):
             items.append(
@@ -443,9 +446,180 @@ class ClientService:
         items.sort(key=lambda x: x.date, reverse=True)
         return ClientHistoryResponse(client_id=str(cid), activities=items)
 
+    # ── SEED STARTER CLIENTS FOR NEW USER ─────────────────────
+    def seed_starter_clients_for_user(self, user_id: object, user_name: str = "") -> List[Client]:
+        """Automatically create 5 diverse starter clients for a newly registered CA."""
+        existing, total = self.repo.get_all(user_id=user_id, page_size=1)
+        if total > 0:
+            logger.info("User %s already has %d clients, skipping seed", user_id, total)
+            return []
+
+        starter_templates = [
+            {
+                "company": "Nexis Infotech Solutions",
+                "name": "Kunal Verma",
+                "type": "company",
+                "cycle": "monthly",
+                "phone": "+91 98201 44102",
+                "email": "accounts@nexisinfotech.in",
+                "location": "Mumbai, Maharashtra",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "gstin": "27AABCN8891P1Z3",
+                "pan": "AABCN8891P",
+                "status": "active",
+                "risk": "low",
+                "gst_status": "filed",
+                "tax_status": "completed",
+                "audit_status": "completed",
+                "revenue": "3450000",
+            },
+            {
+                "company": "Horizon Logistics & Freight",
+                "name": "Pooja Sharma",
+                "type": "llp",
+                "cycle": "quarterly",
+                "phone": "+91 98765 21098",
+                "email": "finance@horizonlogistics.co",
+                "location": "Surat, Gujarat",
+                "city": "Surat",
+                "state": "Gujarat",
+                "gstin": "24AAJCH4412R1Z8",
+                "pan": "AAJCH4412R",
+                "status": "active",
+                "risk": "medium",
+                "gst_status": "pending",
+                "tax_status": "pending",
+                "audit_status": "in_progress",
+                "revenue": "1820000",
+            },
+            {
+                "company": "Vanguard Retail Ventures",
+                "name": "Vikramaditya Roy",
+                "type": "partnership",
+                "cycle": "monthly",
+                "phone": "+91 98310 99482",
+                "email": "billing@vanguardretail.in",
+                "location": "Kolkata, West Bengal",
+                "city": "Kolkata",
+                "state": "West Bengal",
+                "gstin": "19AABFV6623Q1Z5",
+                "pan": "AABFV6623Q",
+                "status": "pending",
+                "risk": "high",
+                "gst_status": "overdue",
+                "tax_status": "pending",
+                "audit_status": "flagged",
+                "revenue": "4200000",
+            },
+            {
+                "company": "Apex Pharma Labs",
+                "name": "Dr. Sanjeev Kapoor",
+                "type": "company",
+                "cycle": "monthly",
+                "phone": "+91 99490 12345",
+                "email": "tax@apexpharmalabs.com",
+                "location": "Hyderabad, Telangana",
+                "city": "Hyderabad",
+                "state": "Telangana",
+                "gstin": "36AABCA9914L1Z2",
+                "pan": "AABCA9914L",
+                "status": "active",
+                "risk": "low",
+                "gst_status": "filed",
+                "tax_status": "completed",
+                "audit_status": "pending",
+                "revenue": "5100000",
+            },
+            {
+                "company": "Heritage Craft Exports",
+                "name": "Meenakshi Sundaram",
+                "type": "individual",
+                "cycle": "quarterly",
+                "phone": "+91 94440 67890",
+                "email": "info@heritagecraftexports.com",
+                "location": "Chennai, Tamil Nadu",
+                "city": "Chennai",
+                "state": "Tamil Nadu",
+                "gstin": "33AAUPM5521N1Z0",
+                "pan": "AAUPM5521N",
+                "status": "inactive",
+                "risk": "low",
+                "gst_status": "filed",
+                "tax_status": "completed",
+                "audit_status": "completed",
+                "revenue": "850000",
+            },
+        ]
+
+        created_clients = []
+        for t in starter_templates:
+            c = Client(
+                user_id=user_id,
+                client_code=_next_code(self.repo),
+                company_name=t["company"],
+                contact_person=t["name"],
+                client_type=t["type"],
+                billing_cycle=t["cycle"],
+                contact_number=t["phone"],
+                email_address=t["email"],
+                email=t["email"],
+                phone=t["phone"],
+                location=t["location"],
+                city=t["city"],
+                state=t["state"],
+                country="India",
+                gst_number=t["gstin"],
+                pan_number=t["pan"],
+                status=t["status"],
+                risk_level=t["risk"],
+            )
+            c = self.repo.create(c)
+            # Add initial GST, Tax, and Audit records
+            self.repo.db.add(
+                GSTRecord(
+                    client_id=c.id,
+                    gst_period=date.today().strftime("%Y-%m"),
+                    gst_type="GSTR-3B",
+                    taxable_amount=Decimal(t["revenue"]),
+                    cgst=Decimal("0"),
+                    sgst=Decimal("0"),
+                    igst=Decimal("0"),
+                    total_tax=Decimal("0"),
+                    filing_status=t["gst_status"],
+                    due_date=date.today() + timedelta(days=20),
+                )
+            )
+            self.repo.db.add(
+                TaxRecord(
+                    client_id=c.id,
+                    financial_year="2025-26",
+                    tax_type="income_tax",
+                    taxable_income=Decimal(t["revenue"]),
+                    tds=Decimal("0"),
+                    advance_tax=Decimal("0"),
+                    total_tax=Decimal("0"),
+                    status=t["tax_status"],
+                )
+            )
+            self.repo.db.add(
+                AuditReport(
+                    client_id=c.id,
+                    audit_type="statutory",
+                    audit_status=t["audit_status"],
+                    findings=f"Initial audit check completed for {t['company']}.",
+                    recommendations="Maintain books updated as per statutory schedule.",
+                )
+            )
+            self.repo.db.commit()
+            created_clients.append(c)
+
+        logger.info("Seeded %d starter clients for user %s (%s)", len(created_clients), user_id, user_name)
+        return created_clients
+
     # ── HELPERS ────────────────────────────────────────────────
-    def _get_or_404(self, client_id) -> Client:
-        c = self.repo.get_by_id(client_id)
+    def _get_or_404(self, client_id, user_id: Optional[object] = None) -> Client:
+        c = self.repo.get_by_id(client_id, user_id=user_id)
         if not c or c.status == "deleted":
             raise NotFoundException(detail=f"Client {client_id} not found")
         return c

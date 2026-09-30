@@ -99,16 +99,75 @@ export interface DocumentUploadPayload {
   priority?: string;
   metadata_json?: string;
   field_verification?: string;
+  extraction_method?: string;
   force_save?: "true" | "false";
   file?: File;
+
+  // Additional OCR & category-specific fields
+  supplier_gstin?: string;
+  customer_gstin?: string;
+  place_of_supply?: string;
+  reverse_charge?: string;
+  payment_terms?: string;
+  currency?: string;
+  pan_number?: string;
+  irn?: string;
+  ack_number?: string;
+  original_invoice_number?: string;
+  reason?: string;
+  vehicle_number?: string;
+  transport_mode?: string;
+  valid_until?: string;
+  cpin?: string;
+  cin?: string;
+  bank?: string;
+  tax_period?: string;
+  company_name?: string;
+  report_title?: string;
+  period_start?: string;
+  period_end?: string;
+  total_sales?: string;
+  [key: string]: any;
+}
+
+
+// -- OCR Multi-record types ------------------------------------
+export interface OcrLineItem {
+  [key: string]: string;
+}
+
+export interface OcrRecord {
+  record_number: number;
+  /** Flat string values keyed by field name */
+  fields: Record<string, string>;
+  line_items: OcrLineItem[];
+  /** Column headers for the line items table */
+  headers?: string[];
 }
 
 // -- OCR Extract Response --------------------------------------
+export interface OcrTableData {
+  headers: string[];
+  headers_raw?: string[];
+  rows: Record<string, string>[];
+  total_rows?: number;
+  table_count?: number;
+}
+
 export interface OcrExtractResponse {
+  success: boolean;
+  has_content: boolean;
+  message: string;
   category: string;
+  extraction_method?: string;
   raw_text: string;
+  // -- Multi-record fields (primary) ---
+  record_count: number;
+  records: OcrRecord[];
+  // -- Legacy single-record fields (= records[0] equivalent) ---
   core_fields: Record<string, OcrField>;
   metadata_fields: Record<string, OcrField>;
+  table_data?: OcrTableData | null;
   validation: {
     gstin?: {
       valid: boolean | null;
@@ -117,15 +176,24 @@ export interface OcrExtractResponse {
       government_verified: boolean;
     };
     amounts?: {
-      consistent: boolean;
-      expected_total?: number;
-      actual_total?: number;
-      difference?: number;
+      ok: boolean | null;
+      supply_type?: string;
+      discrepancy?: number;
+      calculated?: number;
+      declared?: number;
       message: string;
+      needs_review?: boolean;
     };
     warnings: string[];
   };
+  extraction_summary?: {
+    fields_found: number;
+    fields_available?: number;
+    table_rows_found: number;
+    record_count?: number;
+  };
 }
+
 
 // -- Duplicate detection response (409) -----------------------
 export interface DuplicateInfo {

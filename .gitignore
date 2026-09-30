@@ -78,8 +78,13 @@ docker-compose.override.yml
 # ──────────────────────────────────────────────
 *.sql.bak
 *.dump
+*.db
+*.db-wal
+*.db-shm
 database/backup/*.sql
 database/backup/*.dump
+backend/uploads/
+uploads/
 
 # ──────────────────────────────────────────────
 # AI & ML

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Input } from "../ui/input";
 import { Avatar, AvatarFallback } from "../ui/avatar";
+import { GlobalSearch } from "../common/GlobalSearch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,8 +29,8 @@ import {
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "../ui/sheet";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
-import { notifications } from "../../data/mock";
 import { useApp } from "../../context/AppContext";
+import { authService, getStoredUser } from "../../services/auth.service";
 
 const nav = [
   {
@@ -93,12 +94,88 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
-  const { theme, toggleTheme, refreshClients } = useApp();
-  const unread = notifications.filter((n) => n.unread).length;
+  const { theme, toggleTheme, refreshClients, clients } = useApp();
+  const [currentUser, setCurrentUser] = useState(getStoredUser());
 
-  // Fetch clients from backend whenever the authenticated shell mounts
-  // (covers the case where login set the token then navigated here)
+  // Derive notifications dynamically from the current CA's actual clients
+  const dynamicNotifications = useMemo(() => {
+    if (!clients || !clients.length) {
+      return [
+        { id: 1, title: "Workspace initialized", body: "Add your first client to start auditing and tracking filings.", time: "Just now", type: "info", unread: true },
+        { id: 2, title: "New GST circular published", body: "Circular 214/8/2026 — e-invoicing threshold update.", time: "2d ago", type: "info", unread: false },
+      ];
+    }
+    const dueClients = clients.filter((c) => c.gst === "Due" || c.gst === "Overdue");
+    const flaggedClient = clients.find((c) => c.audit === "Flagged");
+    const activeClient = clients.find((c) => c.status === "Active") || clients[0];
+
+    const notifs = [];
+    if (dueClients.length > 0) {
+      notifs.push({
+        id: 1,
+        title: "GSTR-3B due in 5 days",
+        body: `Filing due for ${dueClients.slice(0, 2).map((c) => c.company).join(", ")}${dueClients.length > 2 ? ` + ${dueClients.length - 2} more` : ""}.`,
+        time: "2h ago",
+        type: "warning",
+        unread: true,
+      });
+    } else {
+      notifs.push({
+        id: 1,
+        title: "All GST returns up-to-date",
+        body: `All active clients currently filed for recent period.`,
+        time: "2h ago",
+        type: "success",
+        unread: false,
+      });
+    }
+
+    if (flaggedClient) {
+      notifs.push({
+        id: 2,
+        title: "Audit flag raised",
+        body: `${flaggedClient.company} — suspicious journal entries detected.`,
+        time: "5h ago",
+        type: "danger",
+        unread: true,
+      });
+    } else {
+      notifs.push({
+        id: 2,
+        title: "Audit health check passed",
+        body: `Compliance verified for ${activeClient.company}.`,
+        time: "5h ago",
+        type: "success",
+        unread: true,
+      });
+    }
+
+    notifs.push({
+      id: 3,
+      title: "Invoice OCR complete",
+      body: `12 invoices processed with 98% avg confidence for ${activeClient.company}.`,
+      time: "1d ago",
+      type: "success",
+      unread: false,
+    });
+
+    notifs.push({
+      id: 4,
+      title: "New GST circular published",
+      body: "Circular 214/8/2026 — e-invoicing threshold update.",
+      time: "2d ago",
+      type: "info",
+      unread: false,
+    });
+
+    return notifs;
+  }, [clients]);
+
+  const unread = dynamicNotifications.filter((n) => n.unread).length;
+
+  // Fetch clients and refresh user profile whenever authenticated shell mounts
   useEffect(() => {
+    setCurrentUser(getStoredUser());
     refreshClients();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -138,9 +215,8 @@ export function AppLayout() {
             </SheetContent>
           </Sheet>
 
-          <div className="relative hidden max-w-md flex-1 md:block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search clients, invoices, reports…" className="bg-input-background pl-9" />
+          <div className="hidden max-w-md flex-1 md:block">
+            <GlobalSearch />
           </div>
 
           <div className="ml-auto flex items-center gap-1">
@@ -162,7 +238,7 @@ export function AppLayout() {
                   {unread > 0 && <span className="text-xs text-muted-foreground">{unread} unread</span>}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {notifications.map((n) => (
+                {dynamicNotifications.map((n) => (
                   <DropdownMenuItem key={n.id} className="flex-col items-start gap-0.5 whitespace-normal py-2.5">
                     <div className="flex w-full items-center gap-2">
                       {n.unread && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
@@ -178,22 +254,37 @@ export function AppLayout() {
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-secondary">
                   <Avatar className="size-8">
-                    <AvatarFallback className="bg-primary text-primary-foreground text-xs">RK</AvatarFallback>
+                    <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
+                      {currentUser.initials}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="hidden text-left leading-tight sm:block">
-                    <p className="text-sm">Rahul Khanna</p>
+                    <p className="text-sm font-medium text-foreground">{currentUser.full_name}</p>
                     <p className="text-muted-foreground text-xs">Chartered Accountant</p>
                   </div>
                   <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>My account</DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-semibold text-foreground">{currentUser.full_name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{currentUser.email}</p>
+                    <span className="w-fit rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                      Chartered Accountant
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/app/settings")}>
                   <Settings className="size-4" /> Settings
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { import("../../services/api").then(m => m.clearToken()); navigate("/"); }}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    authService.logout();
+                    navigate("/");
+                  }}
+                >
                   <LogOut className="size-4" /> Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>

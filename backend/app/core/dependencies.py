@@ -4,7 +4,8 @@ Updated for UUID primary keys on the User model.
 """
 
 import uuid
-from fastapi import Depends
+from typing import Optional
+from fastapi import Depends, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -13,13 +14,18 @@ from app.core.exceptions import UnauthorizedException
 from app.database.session import get_db
 from app.models.user import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token_header: Optional[str] = Depends(oauth2_scheme),
+    token_query: Optional[str] = Query(default=None, alias="token"),
     db: Session = Depends(get_db),
 ) -> User:
+    token = token_header or token_query
+    if not token:
+        raise UnauthorizedException(detail="Not authenticated")
+
     payload = decode_token(token)
     if payload is None:
         raise UnauthorizedException(detail="Invalid or expired token")

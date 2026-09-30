@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -56,8 +56,16 @@ export function Workspace() {
   const { clients, addClient, updateClient, deleteClient, refreshClients } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [query, setQuery] = useState("");
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("search") || "");
   const [status, setStatus] = useState("all");
+
+  useEffect(() => {
+    const s = searchParams.get("search");
+    if (s !== null) {
+      setQuery(s);
+    }
+  }, [searchParams]);
   const [risk, setRisk] = useState("all");
   const [view, setView] = useState<"grid" | "table">("grid");
 

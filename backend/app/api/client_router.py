@@ -42,7 +42,7 @@ def create_client(
     user: User = Depends(get_current_user),
 ):
     svc = ClientService(db)
-    card = svc.create_client(data)
+    card = svc.create_client(data, user_id=user.id)
     return APIResponse(data=card, message=f"Client {card.id} created")
 
 
@@ -67,6 +67,7 @@ def list_clients(
         sort_order=sort_order,
         status=status,
         risk_level=risk_level,
+        user_id=user.id,
     )
     return APIResponse(data=result, message="Clients retrieved")
 
@@ -82,7 +83,7 @@ def get_dashboard(
     user: User = Depends(get_current_user),
 ):
     return APIResponse(
-        data=ClientService(db).get_client_dashboard(client_id),
+        data=ClientService(db).get_client_dashboard(client_id, user_id=user.id),
         message="Dashboard retrieved",
     )
 
@@ -98,7 +99,7 @@ def update_client(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    card = ClientService(db).update_client(client_id, data)
+    card = ClientService(db).update_client(client_id, data, user_id=user.id)
     return APIResponse(data=card, message=f"Client {card.id} updated")
 
 
@@ -110,7 +111,7 @@ def delete_client(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    result = ClientService(db).delete_client(client_id)
+    result = ClientService(db).delete_client(client_id, user_id=user.id)
     return APIResponse(data=result, message=result["message"])
 
 
@@ -121,7 +122,7 @@ def overview(
     user: User = Depends(get_current_user),
 ):
     return APIResponse(
-        data=ClientService(db).get_client_overview(client_id), message="OK"
+        data=ClientService(db).get_client_overview(client_id, user_id=user.id), message="OK"
     )
 
 
@@ -131,7 +132,7 @@ def gst_records(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return APIResponse(data=ClientService(db).get_gst_records(client_id), message="OK")
+    return APIResponse(data=ClientService(db).get_gst_records(client_id, user_id=user.id), message="OK")
 
 
 @router.get("/{client_id}/tax", response_model=APIResponse[List[TaxRecordResponse]])
@@ -140,7 +141,7 @@ def tax_records(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return APIResponse(data=ClientService(db).get_tax_records(client_id), message="OK")
+    return APIResponse(data=ClientService(db).get_tax_records(client_id, user_id=user.id), message="OK")
 
 
 @router.get("/{client_id}/audit", response_model=APIResponse[List[AuditReportResponse]])
@@ -150,7 +151,7 @@ def audit_reports(
     user: User = Depends(get_current_user),
 ):
     return APIResponse(
-        data=ClientService(db).get_audit_reports(client_id), message="OK"
+        data=ClientService(db).get_audit_reports(client_id, user_id=user.id), message="OK"
     )
 
 
@@ -160,7 +161,7 @@ def invoices(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return APIResponse(data=ClientService(db).get_invoices(client_id), message="OK")
+    return APIResponse(data=ClientService(db).get_invoices(client_id, user_id=user.id), message="OK")
 
 
 @router.get(
@@ -171,7 +172,7 @@ def documents(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return APIResponse(data=ClientService(db).get_documents(client_id), message="OK")
+    return APIResponse(data=ClientService(db).get_documents(client_id, user_id=user.id), message="OK")
 
 
 @router.get("/{client_id}/history", response_model=APIResponse[ClientHistoryResponse])
@@ -180,4 +181,4 @@ def history(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return APIResponse(data=ClientService(db).get_history(client_id), message="OK")
+    return APIResponse(data=ClientService(db).get_history(client_id, user_id=user.id), message="OK")

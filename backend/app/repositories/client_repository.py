@@ -44,8 +44,12 @@ class ClientRepository:
         sort_order: str = "desc",
         status_filter: Optional[str] = None,
         risk_filter: Optional[str] = None,
+        user_id: Optional[object] = None,
     ) -> Tuple[List[Client], int]:
         q = self.db.query(Client).filter(Client.status != "deleted")
+
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
 
         if search:
             t = f"%{search.strip()}%"
@@ -71,27 +75,38 @@ class ClientRepository:
         return clients, total
 
     # ── Single ─────────────────────────────────────────────────
-    def get_by_id(self, client_id) -> Optional[Client]:
-        return self.db.query(Client).filter(Client.id == client_id).first()
+    def get_by_id(self, client_id, user_id: Optional[object] = None) -> Optional[Client]:
+        q = self.db.query(Client).filter(Client.id == client_id)
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
-    def get_by_code(self, code: str) -> Optional[Client]:
-        return self.db.query(Client).filter(Client.client_code == code).first()
+    def get_by_code(self, code: str, user_id: Optional[object] = None) -> Optional[Client]:
+        q = self.db.query(Client).filter(Client.client_code == code)
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
-    def get_by_company_name(self, name: str) -> Optional[Client]:
-        return (
-            self.db.query(Client)
-            .filter(func.lower(Client.company_name) == name.strip().lower())
-            .first()
-        )
+    def get_by_company_name(self, name: str, user_id: Optional[object] = None) -> Optional[Client]:
+        q = self.db.query(Client).filter(func.lower(Client.company_name) == name.strip().lower())
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
-    def get_by_gst(self, gst: str) -> Optional[Client]:
-        return self.db.query(Client).filter(Client.gst_number == gst.upper()).first()
+    def get_by_gst(self, gst: str, user_id: Optional[object] = None) -> Optional[Client]:
+        q = self.db.query(Client).filter(Client.gst_number == gst.upper())
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
-    def get_by_pan(self, pan: str) -> Optional[Client]:
-        return self.db.query(Client).filter(Client.pan_number == pan.upper()).first()
+    def get_by_pan(self, pan: str, user_id: Optional[object] = None) -> Optional[Client]:
+        q = self.db.query(Client).filter(Client.pan_number == pan.upper())
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
-    def get_full_dashboard(self, client_id) -> Optional[Client]:
-        return (
+    def get_full_dashboard(self, client_id, user_id: Optional[object] = None) -> Optional[Client]:
+        q = (
             self.db.query(Client)
             .options(
                 joinedload(Client.accounting_records),
@@ -102,8 +117,10 @@ class ClientRepository:
                 joinedload(Client.documents),
             )
             .filter(Client.id == client_id)
-            .first()
         )
+        if user_id is not None:
+            q = q.filter(Client.user_id == user_id)
+        return q.first()
 
     def get_max_code_sequence(self) -> int:
         codes = self.db.query(Client.client_code).all()

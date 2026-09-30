@@ -139,10 +139,25 @@ export function FilePreviewModal({ open, onOpenChange, docId, fileName, fileType
                   Preview not available for .{ext} files.
                 </p>
               </div>
-              <Button variant="outline" onClick={() => {
+              <Button variant="outline" onClick={async () => {
                 const token = localStorage.getItem("ca_token");
                 const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
-                window.open(`${base}/invoices/document/${docId}/download${token ? `?token=${token}` : ""}`, "_blank");
+                const url = `${base}/invoices/document/${docId}/download${token ? `?token=${token}` : ""}`;
+                try {
+                  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+                  if (!res.ok) throw new Error("Download failed");
+                  const blob = await res.blob();
+                  const bUrl = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = bUrl;
+                  a.download = fileName;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(bUrl), 1000);
+                } catch {
+                  window.open(url, "_blank");
+                }
               }}>
                 <Download className="size-4" /> Download file
               </Button>

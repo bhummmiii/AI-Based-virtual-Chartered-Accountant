@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Separator } from "../components/ui/separator";
+import { getStoredUser } from "../services/auth.service";
 
 function Row({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
   return (
@@ -20,6 +21,8 @@ function Row({ title, desc, children }: { title: string; desc: string; children:
 }
 
 export function Settings() {
+  const currentUser = getStoredUser();
+
   return (
     <>
       <PageHeader title="Settings" subtitle="Manage your profile, security and preferences" />
@@ -38,16 +41,20 @@ export function Settings() {
             <CardHeader><CardTitle>Profile</CardTitle><CardDescription>Update your personal information</CardDescription></CardHeader>
             <CardContent className="space-y-5">
               <div className="flex items-center gap-4">
-                <Avatar className="size-16"><AvatarFallback className="bg-primary text-primary-foreground text-lg">RK</AvatarFallback></Avatar>
+                <Avatar className="size-16">
+                  <AvatarFallback className="bg-primary text-primary-foreground text-lg font-semibold">
+                    {currentUser.initials}
+                  </AvatarFallback>
+                </Avatar>
                 <div className="space-y-1">
                   <Button variant="outline" size="sm">Change photo</Button>
                   <p className="text-xs text-muted-foreground">JPG or PNG, max 2 MB</p>
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2"><Label>First name</Label><Input defaultValue="Rahul" /></div>
-                <div className="space-y-2"><Label>Last name</Label><Input defaultValue="Khanna" /></div>
-                <div className="space-y-2"><Label>Email</Label><Input defaultValue="rahul@finledger.ai" /></div>
+                <div className="space-y-2"><Label>First name</Label><Input defaultValue={currentUser.firstName} /></div>
+                <div className="space-y-2"><Label>Last name</Label><Input defaultValue={currentUser.lastName} /></div>
+                <div className="space-y-2"><Label>Email</Label><Input defaultValue={currentUser.email} /></div>
                 <div className="space-y-2"><Label>Membership No.</Label><Input defaultValue="ICAI-123456" /></div>
               </div>
               <Button>Save changes</Button>

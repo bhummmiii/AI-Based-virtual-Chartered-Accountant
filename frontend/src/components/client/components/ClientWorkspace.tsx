@@ -1,5 +1,5 @@
 // ============================================================
-// ClientWorkspace ó Full document management workspace for one client
+// ClientWorkspace ÔøΩ Full document management workspace for one client
 // ============================================================
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
@@ -9,6 +9,7 @@ import { listDocuments, deleteDocument } from "../../../services/api/documents";
 import { DocumentCategoryModal } from "./DocumentCategoryModal";
 import { UploadDocumentModal } from "./UploadDocumentModal";
 import { ScanDocumentModal } from "./ScanDocumentModal";
+import { DocumentDetailModal } from "./DocumentDetailModal";
 
 // -- Types -----------------------------------------------------
 type ModalState =
@@ -16,7 +17,8 @@ type ModalState =
   | { type: "category-upload" }
   | { type: "category-scan" }
   | { type: "upload"; category: DocumentCategory }
-  | { type: "scan";   category: DocumentCategory };
+  | { type: "scan";   category: DocumentCategory }
+  | { type: "view-doc"; docId: string };
 
 // -- Status badge ----------------------------------------------
 const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
@@ -34,7 +36,7 @@ const OcrBadge: React.FC<{ status?: string }> = ({ status }) => {
   if (!status || status === "pending") return null;
   const map: Record<string, { label: string; cls: string }> = {
     done:       { label: "OCR Done",       cls: "ocr-done" },
-    processing: { label: "ProcessingÖ",    cls: "ocr-processing" },
+    processing: { label: "ProcessingÔøΩ",    cls: "ocr-processing" },
     failed:     { label: "OCR Failed",     cls: "ocr-failed" },
   };
   const info = map[status];
@@ -123,7 +125,7 @@ export const ClientWorkspace: React.FC = () => {
         <div className="toolbar-right">
           <input
             className="search-input"
-            placeholder="Search by invoice #, vendor, GSTINÖ"
+            placeholder="Search by invoice #, vendor, GSTINÔøΩ"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -156,7 +158,7 @@ export const ClientWorkspace: React.FC = () => {
       {loading && (
         <div className="loading-state">
           <div className="loading-spinner" />
-          <p>Loading documentsÖ</p>
+          <p>Loading documentsÔøΩ</p>
         </div>
       )}
 
@@ -206,13 +208,13 @@ export const ClientWorkspace: React.FC = () => {
                     </span>
                   </td>
                   <td className="mono-cell">
-                    {doc.invoice_number ?? doc.notice_number ?? doc.arn ?? "ó"}
+                    {doc.invoice_number ?? doc.notice_number ?? doc.arn ?? "ÔøΩ"}
                   </td>
-                  <td>{doc.vendor ?? doc.customer ?? "ó"}</td>
-                  <td className="mono-cell">{doc.gstin ?? "ó"}</td>
-                  <td>{doc.invoice_date ?? doc.notice_date ?? doc.filed_date ?? "ó"}</td>
+                  <td>{doc.vendor ?? doc.customer ?? "ÔøΩ"}</td>
+                  <td className="mono-cell">{doc.gstin ?? "ÔøΩ"}</td>
+                  <td>{doc.invoice_date ?? doc.notice_date ?? doc.filed_date ?? "ÔøΩ"}</td>
                   <td className="amount-cell">
-                    {doc.amount != null ? `?${Number(doc.amount).toLocaleString("en-IN")}` : "ó"}
+                    {doc.amount != null ? `?${Number(doc.amount).toLocaleString("en-IN")}` : "ÔøΩ"}
                   </td>
                   <td><StatusBadge status={doc.status} /></td>
                   <td><OcrBadge status={doc.ocr_status} /></td>
@@ -221,17 +223,35 @@ export const ClientWorkspace: React.FC = () => {
                       <span className="file-chip" title={doc.file_name}>
                         ?? {doc.file_type?.toUpperCase() ?? "FILE"}
                       </span>
-                    ) : "ó"}
+                    ) : "ÔøΩ"}
                   </td>
                   <td>
                     <div className="row-actions">
+                      <button
+                        className="action-btn action-view"
+                        onClick={() => setModal({ type: "view-doc", docId: doc.id })}
+                        title="View"
+                        style={{
+                          padding: "0.3rem 0.55rem",
+                          borderRadius: "6px",
+                          border: "1px solid #c7d2fe",
+                          background: "#eef2ff",
+                          color: "#4f46e5",
+                          cursor: "pointer",
+                          fontSize: "0.8rem",
+                          fontWeight: 500,
+                          marginRight: "0.35rem",
+                        }}
+                      >
+                        üëÅ View
+                      </button>
                       <button
                         className="action-btn action-delete"
                         onClick={() => handleDelete(doc.id)}
                         disabled={deletingId === doc.id}
                         title="Delete"
                       >
-                        {deletingId === doc.id ? "Ö" : "??"}
+                        {deletingId === doc.id ? "ÔøΩ" : "??"}
                       </button>
                     </div>
                   </td>
@@ -272,6 +292,12 @@ export const ClientWorkspace: React.FC = () => {
           category={modal.category}
           onClose={() => setModal({ type: "none" })}
           onSuccess={handleSuccess}
+        />
+      )}
+      {modal.type === "view-doc" && (
+        <DocumentDetailModal
+          docId={modal.docId}
+          onClose={() => setModal({ type: "none" })}
         />
       )}
     </div>
