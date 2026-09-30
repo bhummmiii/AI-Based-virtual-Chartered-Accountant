@@ -57,6 +57,9 @@ class ClientCreate(BaseModel):
     clientType: Optional[str] = Field(
         default="Monthly", description="Monthly | Quarterly"
     )
+    return_frequency: Optional[str] = Field(
+        default="Quarterly", description="Monthly | Quarterly"
+    )
     contactNumber: Optional[str] = Field(
         default=None, description="Mobile number (10–15 digits)"
     )
@@ -118,6 +121,7 @@ class ClientUpdate(BaseModel):
     industry: Optional[str] = None
     # ── New fields ──────────────────────────────────────────
     clientType: Optional[str] = None
+    return_frequency: Optional[str] = None
     contactNumber: Optional[str] = None
     emailAddress: Optional[str] = None
     location: Optional[str] = None
@@ -161,6 +165,7 @@ class ClientCardResponse(BaseModel):
     lastActivity: str = "Recently"
     avatar: str = "??"
     db_id: str  # UUID string — used for PUT/DELETE/dashboard API calls
+    return_frequency: Optional[str] = "Quarterly"
 
     class Config:
         from_attributes = True
@@ -186,6 +191,7 @@ class ClientResponse(BaseModel):
     status: str
     # ── New fields ──────────────────────────────────────────
     billing_cycle: Optional[str] = None
+    return_frequency: Optional[str] = "Quarterly"
     contact_number: Optional[str] = None
     email_address: Optional[str] = None
     location: Optional[str] = None
