@@ -102,7 +102,7 @@ _HEADER_WORDS = {
     "net", "gross", "total", "grand", "balance", "due",
     "cgst", "sgst", "igst", "cess", "gst",
     "hsn", "sac", "code",
-    "from", "to", "bill", "doc", "document", "ref", "reference",
+    "from", "to", "bill", "doc", "document", "ref", "reference", "entered",
     "sr", "sr.", "s.no", "s.no.", "serial",
     "particular", "particulars", "details",
     "mobile", "email", "address",
@@ -114,7 +114,7 @@ _HEADER_PHRASES = {
     "party name", "customer name", "buyer name", "vendor name", "supplier name",
     "item name", "item description", "goods description",
     "net price", "unit price", "tax amount", "net amount", "taxable amount",
-    "invoice date", "bill date", "doc date",
+    "invoice date", "bill date", "doc date", "entered date",
     "sale analysis report", "sales analysis report",
     "purchase analysis", "credit note", "debit note",
 }
@@ -153,12 +153,13 @@ def _is_header_word(value: str) -> bool:
     if not value:
         return True
     v = value.strip().lower()
-    if v in _HEADER_WORDS:
+    v_clean = v.strip("()[]{}").strip()
+    if v in _HEADER_WORDS or v_clean in _HEADER_WORDS:
         return True
-    if v in _HEADER_PHRASES:
+    if v in _HEADER_PHRASES or v_clean in _HEADER_PHRASES:
         return True
     # Single word that is all-alphabetic and common label word
-    if len(v.split()) == 1 and v.isalpha() and v in _HEADER_WORDS:
+    if len(v_clean.split()) == 1 and v_clean.isalpha() and v_clean in _HEADER_WORDS:
         return True
     return False
 
@@ -1045,16 +1046,17 @@ def _extract_parties_robust(raw_text: str, tables: Optional[List[Dict]] = None) 
     for i, line in enumerate(lines):
         line_clean = line.lower().strip().rstrip(":")
         line_clean_no_parens = re.sub(r'[\(\)]', '', line_clean).strip()
-        if any(line_clean.startswith(k) or line_clean_no_parens.startswith(k) for k in (
+        line_clean_loose = re.sub(r'\s+', ' ', re.sub(r'[^\w\s]', ' ', line_clean)).strip()
+        if any(line_clean.startswith(k) or line_clean_no_parens.startswith(k) or line_clean_loose.startswith(k) for k in (
             "supplier", "seller", "supplier / seller", "vendor", "billed from", "from",
             "supplier from", "consignor"
         )) and i + 1 < len(lines):
             cand = _clean_party_name(lines[i+1])
             if cand and not vendor:
                 vendor = cand
-        if any(line_clean.startswith(k) or line_clean_no_parens.startswith(k) for k in (
-            "customer", "buyer", "customer / bill to", "recipient", "bill to", "sold to",
-            "recipient to", "recipient bill to", "recipient bill to / ship to", "consignee"
+        if any(line_clean.startswith(k) or line_clean_no_parens.startswith(k) or line_clean_loose.startswith(k) for k in (
+            "customer", "buyer", "customer / bill to", "customer bill to", "recipient", "bill to", "sold to",
+            "recipient to", "recipient bill to", "recipient bill to / ship to", "recipient bill to ship to", "consignee"
         )) and i + 1 < len(lines):
             cand = _clean_party_name(lines[i+1])
             if cand and not customer:

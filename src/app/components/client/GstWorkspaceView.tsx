@@ -812,7 +812,7 @@ export function GstWorkspaceView({
           {activeTab === "gstr1" && (
             <div className="space-y-4 p-4">
               {/* Category Breakdown Cards */}
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                 <div className="rounded-lg border border-border/70 bg-card/60 p-3">
                   <span className="text-[11px] font-semibold uppercase text-muted-foreground">
                     4A, 4B B2B Invoices
@@ -827,6 +827,23 @@ export function GstWorkspaceView({
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     Tax: {formatGstCurrency(Number(gstr1Data?.b2b_summary?.total_tax || 0))}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border/70 bg-card/60 p-3">
+                  <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                    5A, 5B B2C (Large) Invoices
+                  </span>
+                  <div className="mt-1 flex items-baseline justify-between">
+                    <p className="text-base font-bold font-mono text-foreground">
+                      {formatGstCurrency(Number(gstr1Data?.b2cl_summary?.taxable_amount || 0))}
+                    </p>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      {gstr1Data?.b2cl_summary?.invoice_count ?? 0} inv
+                    </Badge>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Tax: {formatGstCurrency(Number(gstr1Data?.b2cl_summary?.total_tax || 0))}
                   </p>
                 </div>
 
@@ -849,18 +866,35 @@ export function GstWorkspaceView({
 
                 <div className="rounded-lg border border-border/70 bg-card/60 p-3">
                   <span className="text-[11px] font-semibold uppercase text-muted-foreground">
-                    9B Credit / Debit Notes
+                    9B Credit Notes
                   </span>
                   <div className="mt-1 flex items-baseline justify-between">
                     <p className="text-base font-bold font-mono text-foreground">
-                      {formatGstCurrency(Number(gstr1Data?.credit_notes_summary?.taxable_amount || 0))}
+                      -{formatGstCurrency(Math.abs(Number(gstr1Data?.credit_notes_summary?.taxable_amount || 0)))}
                     </p>
                     <Badge variant="outline" className="text-[10px] font-mono">
                       {gstr1Data?.credit_notes_summary?.invoice_count ?? 0} note
                     </Badge>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Deducted Tax: {formatGstCurrency(Number(gstr1Data?.credit_notes_summary?.total_tax || 0))}
+                    Tax: -{formatGstCurrency(Math.abs(Number(gstr1Data?.credit_notes_summary?.total_tax || 0)))}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border/70 bg-card/60 p-3">
+                  <span className="text-[11px] font-semibold uppercase text-muted-foreground">
+                    9B Debit Notes
+                  </span>
+                  <div className="mt-1 flex items-baseline justify-between">
+                    <p className="text-base font-bold font-mono text-foreground">
+                      {formatGstCurrency(Number(gstr1Data?.debit_notes_summary?.taxable_amount || 0))}
+                    </p>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      {gstr1Data?.debit_notes_summary?.invoice_count ?? 0} note
+                    </Badge>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Tax: {formatGstCurrency(Number(gstr1Data?.debit_notes_summary?.total_tax || 0))}
                   </p>
                 </div>
               </div>
