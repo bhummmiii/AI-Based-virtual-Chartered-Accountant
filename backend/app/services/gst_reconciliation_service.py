@@ -197,15 +197,18 @@ class GstReconciliationService:
                 elif meta_customer_gstin and meta_customer_gstin == client_gstin:
                     return "INWARD"
 
+            if doc.invoice_type and "sales" in doc.invoice_type.lower():
+                return "OUTWARD"
+            if doc.invoice_type and "purchase" in doc.invoice_type.lower():
+                return "INWARD"
+
             # Party names fallback
             if doc.customer and not doc.vendor:
                 return "OUTWARD"
             if doc.vendor and not doc.customer:
                 return "INWARD"
-            if cat == "credit_note":
-                return "OUTWARD"
-            if doc.customer and doc.vendor:
-                return "OUTWARD"
+
+            return "NEEDS_REVIEW"
 
         # 4. Standard Documents: Strict Client GSTIN Anchor
         if meta_supplier_gstin and client_gstin and meta_supplier_gstin == client_gstin:

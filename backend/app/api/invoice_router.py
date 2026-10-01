@@ -220,6 +220,53 @@ async def upload_document(
 
     _force_save = str(force_save or "false").lower() in ("true", "1", "yes")
 
+    # ── Client GSTIN Anchor Validation (D4 / CLIENT_MISMATCH) ──
+    client_gstin = (client.gst_number or "").strip().upper()
+    if client_gstin and len(client_gstin) == 15 and not _force_save:
+        up_supplier_gst = ""
+        up_customer_gst = ""
+        if metadata_json:
+            try:
+                m_obj = _json.loads(metadata_json)
+                m_fields = m_obj.get("fields") if isinstance(m_obj, dict) else {}
+                if not isinstance(m_fields, dict):
+                    m_fields = m_obj if isinstance(m_obj, dict) else {}
+                def _gv(k):
+                    v = m_fields.get(k)
+                    return v.get("value") if isinstance(v, dict) else v
+                up_supplier_gst = str(_gv("supplier_gstin") or _gv("seller_gstin") or _gv("vendor_gstin") or "").strip().upper()
+                up_customer_gst = str(_gv("customer_gstin") or _gv("buyer_gstin") or _gv("recipient_gstin") or "").strip().upper()
+            except Exception:
+                pass
+
+        form_g = (gstin or "").strip().upper()
+        if len(form_g) == 15:
+            if not up_supplier_gst and not up_customer_gst:
+                if document_category in ("sales_records", "b2c_invoice") and form_g != client_gstin:
+                    raise BadRequestException(
+                        detail=f"CLIENT_MISMATCH: Sales document supplier GSTIN '{form_g}' does not match client GSTIN '{client_gstin}'."
+                    )
+            elif not up_supplier_gst and form_g == client_gstin:
+                up_supplier_gst = form_g
+
+        if up_supplier_gst and up_customer_gst:
+            if len(up_supplier_gst) == 15 and len(up_customer_gst) == 15:
+                if up_supplier_gst != client_gstin and up_customer_gst != client_gstin:
+                    raise BadRequestException(
+                        detail=f"CLIENT_MISMATCH: Document does not belong to client '{client.company_name}' ({client_gstin}). "
+                               f"Supplier GSTIN ({up_supplier_gst}) and Recipient GSTIN ({up_customer_gst}) both differ from client GSTIN."
+                    )
+        elif up_supplier_gst and len(up_supplier_gst) == 15:
+            if document_category in ("sales_records", "b2c_invoice") and up_supplier_gst != client_gstin:
+                raise BadRequestException(
+                    detail=f"CLIENT_MISMATCH: Sales document supplier GSTIN '{up_supplier_gst}' does not match client GSTIN '{client_gstin}'."
+                )
+        elif up_customer_gst and len(up_customer_gst) == 15:
+            if document_category in ("purchase_records",) and up_customer_gst != client_gstin:
+                raise BadRequestException(
+                    detail=f"CLIENT_MISMATCH: Purchase document recipient GSTIN '{up_customer_gst}' does not match client GSTIN '{client_gstin}'."
+                )
+
     # ── Duplicate detection ──
     if not _force_save:
         dup = detect_duplicate(

@@ -195,18 +195,19 @@ class AccountingMappingService:
                     note_side = "SALES"
                 elif not note_side and meta_customer_gstin and client_gstin and meta_customer_gstin == client_gstin:
                     note_side = "PURCHASE"
+                elif not note_side and doc.invoice_type and "sales" in doc.invoice_type.lower():
+                    note_side = "SALES"
+                elif not note_side and doc.invoice_type and "purchase" in doc.invoice_type.lower():
+                    note_side = "PURCHASE"
                 elif not note_side and doc.customer and not doc.vendor:
                     note_side = "SALES"
                 elif not note_side and doc.vendor and not doc.customer:
                     note_side = "PURCHASE"
-                elif not note_side and ("purchase" in cat or "purchase" in raw_text_content.lower() or (doc.invoice_type and "purchase" in doc.invoice_type.lower())):
-                    note_side = "PURCHASE"
-                elif not note_side and ("sales" in cat or "sales" in raw_text_content.lower() or (doc.invoice_type and "sales" in doc.invoice_type.lower())):
-                    note_side = "SALES"
-                elif cat == "credit_note":
-                    note_side = "SALES"
-                else:
-                    note_side = "PURCHASE"
+                elif not note_side:
+                    raise BadRequestException(
+                        detail=f"needs_review: Note '{doc.invoice_number or doc.id}' direction cannot be resolved "
+                               f"without original invoice reference or 'applies_to' override (SALES or PURCHASE)."
+                    )
 
             if note_side == "SALES":
                 is_outward = True
