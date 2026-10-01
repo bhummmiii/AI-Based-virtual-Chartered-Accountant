@@ -152,9 +152,104 @@ export function GstWorkspaceView({
 
 
 
+  // ── Calculations for Display ───────────────────────────────────
+  const outwardTaxable = Number(gstr1Data?.total_outward_taxable || gstr3bData?.table_3_1_outward?.taxable_value || 0);
+  const outwardTax = Number(gstr1Data?.total_outward_tax || 0) || (Number(gstr3bData?.table_3_1_outward?.cgst || 0) + Number(gstr3bData?.table_3_1_outward?.sgst || 0) + Number(gstr3bData?.table_3_1_outward?.igst || 0));
+  const outwardIgst = Number(gstr3bData?.table_3_1_outward?.igst ?? gstr1Data?.total_outward_igst ?? 0);
+  const outwardCgst = Number(gstr3bData?.table_3_1_outward?.cgst ?? gstr1Data?.total_outward_cgst ?? 0);
+  const outwardSgst = Number(gstr3bData?.table_3_1_outward?.sgst ?? gstr1Data?.total_outward_sgst ?? 0);
+
+  const inwardTaxable = Number(gstr2bData?.total_inward_taxable || 0);
+  const eligibleItc = Number(gstr2bData?.total_eligible_itc || 0);
+  const eligibleIgst = Number(gstr3bData?.table_4_net_itc?.igst ?? gstr2bData?.eligible_itc_igst ?? 0);
+  const eligibleCgst = Number(gstr3bData?.table_4_net_itc?.cgst ?? gstr2bData?.eligible_itc_cgst ?? 0);
+  const eligibleSgst = Number(gstr3bData?.table_4_net_itc?.sgst ?? gstr2bData?.eligible_itc_sgst ?? 0);
+  const ineligibleItc = Number(gstr2bData?.ineligible_itc || 0);
+
+  const netCashPayable = Number(gstr3bData?.tax_payable_in_cash || Math.max(0, outwardTax - eligibleItc));
+  const totalDiscrepancies = discrepancyData?.total_discrepancies ?? 0;
+  const highRiskCount = discrepancyData?.high_count ?? 0;
+  const isFilingBlocked = outwardTax < 0 || highRiskCount > 0;
+
+  // ── Statutory Due Date Calculator ──────────────────────────────
+  const computeStatutoryDueDate = (period: string, form: string, freq: string): string => {
+    let year = 2026;
+    let month = 9;
+
+    if (period && period.includes("-Q")) {
+      const parts = period.split("-Q");
+      year = parseInt(parts[0], 10) || 2026;
+      const q = parseInt(parts[1], 10) || 2;
+      if (q === 1) month = 6;
+      else if (q === 2) month = 9;
+      else if (q === 3) month = 12;
+      else if (q === 4) { month = 3; year += 1; }
+    } else if (period && period.includes("-")) {
+      const parts = period.split("-");
+      year = parseInt(parts[0], 10) || 2026;
+      month = parseInt(parts[1], 10) || 9;
+    }
+
+    let dueYear = year;
+    let dueMonth = month + 1;
+    if (dueMonth > 12) {
+      dueMonth = 1;
+      dueYear += 1;
+    }
+
+    const pad = (n: number) => String(n).padStart(2, "0");
+
+    if (form === "GSTR-1") {
+      const day = freq.toLowerCase().includes("quarter") ? "13" : "11";
+      return `${dueYear}-${pad(dueMonth)}-${day}`;
+    } else if (form === "GSTR-3B") {
+      const day = freq.toLowerCase().includes("quarter") ? "22" : "20";
+      return `${dueYear}-${pad(dueMonth)}-${day}`;
+    } else if (form === "GSTR-9") {
+      return `${dueYear}-12-31`;
+    }
+    return `${dueYear}-${pad(dueMonth)}-20`;
+  };
+
+  // Open modal with prefilled statutory values
+  const openFilingModal = () => {
+    const targetPeriod = selectedPeriod && selectedPeriod !== "all" ? selectedPeriod : "2026-09";
+    setFilingPeriod(targetPeriod);
+    const form = filingForm || "GSTR-3B";
+    if (form === "GSTR-1") {
+      setFilingTaxable(outwardTaxable.toFixed(2));
+      setFilingTax(outwardTax.toFixed(2));
+    } else {
+      setFilingTaxable(outwardTaxable.toFixed(2));
+      setFilingTax(netCashPayable.toFixed(2));
+    }
+    setFilingDueDate(computeStatutoryDueDate(targetPeriod, form, returnFrequency));
+    setRecordModalOpen(true);
+  };
+
+  const handleFormChange = (newForm: string) => {
+    setFilingForm(newForm);
+    if (newForm === "GSTR-1") {
+      setFilingTaxable(outwardTaxable.toFixed(2));
+      setFilingTax(outwardTax.toFixed(2));
+    } else {
+      setFilingTaxable(outwardTaxable.toFixed(2));
+      setFilingTax(netCashPayable.toFixed(2));
+    }
+    setFilingDueDate(computeStatutoryDueDate(filingPeriod, newForm, returnFrequency));
+  };
+
   // ── Handle Record Filing Submission ────────────────────────────
   const handleRecordFiling = async () => {
     if (!clientId) return;
+    if (isFilingBlocked) {
+      toast.error("Statutory filing blocked", {
+        description: highRiskCount > 0
+          ? `${highRiskCount} unresolved high-risk discrepancy(ies) must be resolved first.`
+          : "Outward tax liability cannot be negative.",
+      });
+      return;
+    }
     setSubmittingFiling(true);
     const token = localStorage.getItem("ca_token") || localStorage.getItem("access_token");
     const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
@@ -201,33 +296,6 @@ export function GstWorkspaceView({
       setSubmittingFiling(false);
     }
   };
-
-  // Open modal with prefilled GSTR-3B values
-  const openFilingModal = () => {
-    if (gstr3bData) {
-      setFilingTaxable(String(gstr3bData.table_3_1_outward?.taxable_value || ""));
-      setFilingTax(String(gstr3bData.tax_payable_in_cash || ""));
-    }
-    setRecordModalOpen(true);
-  };
-
-  // ── Calculations for Display ───────────────────────────────────
-  const outwardTaxable = Number(gstr1Data?.total_outward_taxable || gstr3bData?.table_3_1_outward?.taxable_value || 0);
-  const outwardTax = Number(gstr1Data?.total_outward_tax || 0) || (Number(gstr3bData?.table_3_1_outward?.cgst || 0) + Number(gstr3bData?.table_3_1_outward?.sgst || 0) + Number(gstr3bData?.table_3_1_outward?.igst || 0));
-  const outwardIgst = Number(gstr3bData?.table_3_1_outward?.igst ?? gstr1Data?.total_outward_igst ?? 0);
-  const outwardCgst = Number(gstr3bData?.table_3_1_outward?.cgst ?? gstr1Data?.total_outward_cgst ?? 0);
-  const outwardSgst = Number(gstr3bData?.table_3_1_outward?.sgst ?? gstr1Data?.total_outward_sgst ?? 0);
-
-  const inwardTaxable = Number(gstr2bData?.total_inward_taxable || 0);
-  const eligibleItc = Number(gstr2bData?.total_eligible_itc || 0);
-  const eligibleIgst = Number(gstr3bData?.table_4_net_itc?.igst ?? gstr2bData?.eligible_itc_igst ?? 0);
-  const eligibleCgst = Number(gstr3bData?.table_4_net_itc?.cgst ?? gstr2bData?.eligible_itc_cgst ?? 0);
-  const eligibleSgst = Number(gstr3bData?.table_4_net_itc?.sgst ?? gstr2bData?.eligible_itc_sgst ?? 0);
-  const ineligibleItc = Number(gstr2bData?.ineligible_itc || 0);
-
-  const netCashPayable = Number(gstr3bData?.tax_payable_in_cash || Math.max(0, outwardTax - eligibleItc));
-  const totalDiscrepancies = discrepancyData?.total_discrepancies ?? 0;
-  const highRiskCount = discrepancyData?.high_count ?? 0;
 
   return (
     <div className="space-y-6">
@@ -1367,29 +1435,55 @@ export function GstWorkspaceView({
             </DialogDescription>
           </DialogHeader>
 
+          {/* Statutory Blocking Alert Banner */}
+          {highRiskCount > 0 && (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
+              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-xs">Statutory Filing Blocked</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                  {highRiskCount} unresolved high-risk discrepancy(ies) detected for this period. Resolve all discrepancies in the Discrepancies tab before recording statutory return filing.
+                </p>
+              </div>
+            </div>
+          )}
+          {outwardTax < 0 && (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
+              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-xs">Negative Tax Liability Blocked</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                  Outward tax liability is negative (₹{outwardTax.toFixed(2)}). Under statutory GST rules, return filings cannot be submitted with negative liability.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-3 py-2 text-xs">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs">Filing Period (YYYY-MM)</Label>
+                <Label className="text-xs">Filing Period</Label>
                 <Input
-                  className="h-8 text-xs font-mono"
+                  className="h-8 text-xs font-mono bg-muted/30 cursor-not-allowed"
                   value={filingPeriod}
-                  onChange={(e) => setFilingPeriod(e.target.value)}
+                  readOnly
                   placeholder="2026-09"
                 />
+                <p className="text-[10px] text-muted-foreground">Locked to selected period</p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Return Form</Label>
-                <Select value={filingForm} onValueChange={setFilingForm}>
+                <Select value={filingForm} onValueChange={handleFormChange}>
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="GSTR-3B">GSTR-3B (Monthly Summary)</SelectItem>
+                    <SelectItem value="GSTR-3B">GSTR-3B (Monthly/Quarterly Summary)</SelectItem>
                     <SelectItem value="GSTR-1">GSTR-1 (Outward Supplies)</SelectItem>
                     <SelectItem value="GSTR-9">GSTR-9 (Annual Return)</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-[10px] text-muted-foreground">{returnFrequency} filing profile</p>
               </div>
             </div>
 
@@ -1397,22 +1491,22 @@ export function GstWorkspaceView({
               <div className="space-y-1">
                 <Label className="text-xs">Taxable Value (₹)</Label>
                 <Input
-                  type="number"
-                  className="h-8 text-xs font-mono"
-                  value={filingTaxable}
-                  onChange={(e) => setFilingTaxable(e.target.value)}
-                  placeholder="0.00"
+                  type="text"
+                  className="h-8 text-xs font-mono bg-muted/30 font-semibold cursor-not-allowed"
+                  value={filingTaxable ? formatGstCurrency(parseFloat(filingTaxable)) : "₹0.00"}
+                  readOnly
                 />
+                <p className="text-[10px] text-muted-foreground">Derived from posted ledger lines</p>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Total Tax Paid (₹)</Label>
+                <Label className="text-xs">{filingForm === "GSTR-1" ? "Outward Tax (₹)" : "Net Cash Tax (₹)"}</Label>
                 <Input
-                  type="number"
-                  className="h-8 text-xs font-mono"
-                  value={filingTax}
-                  onChange={(e) => setFilingTax(e.target.value)}
-                  placeholder="0.00"
+                  type="text"
+                  className="h-8 text-xs font-mono bg-muted/30 font-semibold text-primary cursor-not-allowed"
+                  value={filingTax ? formatGstCurrency(parseFloat(filingTax)) : "₹0.00"}
+                  readOnly
                 />
+                <p className="text-[10px] text-muted-foreground">Derived statutory liability</p>
               </div>
             </div>
 
@@ -1420,10 +1514,11 @@ export function GstWorkspaceView({
               <Label className="text-xs">Statutory Due Date</Label>
               <Input
                 type="date"
-                className="h-8 text-xs font-mono"
+                className="h-8 text-xs font-mono bg-muted/30 cursor-not-allowed"
                 value={filingDueDate}
-                onChange={(e) => setFilingDueDate(e.target.value)}
+                readOnly
               />
+              <p className="text-[10px] text-muted-foreground">Computed by GST rules for {returnFrequency} {filingForm}</p>
             </div>
           </div>
 
@@ -1431,8 +1526,13 @@ export function GstWorkspaceView({
             <Button variant="outline" size="sm" onClick={() => setRecordModalOpen(false)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleRecordFiling} disabled={submittingFiling}>
-              {submittingFiling ? "Recording…" : "Save Filing Record"}
+            <Button
+              size="sm"
+              onClick={handleRecordFiling}
+              disabled={submittingFiling || isFilingBlocked}
+              className={isFilingBlocked ? "opacity-50 cursor-not-allowed" : ""}
+            >
+              {submittingFiling ? "Recording…" : isFilingBlocked ? "Filing Blocked" : "Save Filing Record"}
             </Button>
           </DialogFooter>
         </DialogContent>

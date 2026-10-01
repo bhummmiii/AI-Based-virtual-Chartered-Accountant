@@ -316,6 +316,26 @@ def create_gst_record(
     if total_tax is None:
         total_tax = cgst + sgst + igst
 
+    # 2b. Statutory Validation Gate:
+    # A. Tax liability and taxable turnover cannot be negative under statutory GST rules
+    if (total_tax is not None and total_tax < Decimal("0.00")) or (taxable_amount is not None and taxable_amount < Decimal("0.00")):
+        raise BadRequestException(
+            detail="Statutory Filing Blocked: Total statutory tax liability and taxable amount cannot be negative."
+        )
+
+    # B. Block filing if client has unresolved high-risk discrepancies for the period
+    if payload.filing_status.lower() in ("filed", "completed"):
+        discrepancies = GstReconciliationService.detect_discrepancies(
+            db=db,
+            client_id=payload.client_id,
+            user=current_user,
+            period=payload.gst_period,
+        )
+        if discrepancies.high_count > 0:
+            raise BadRequestException(
+                detail=f"Statutory Filing Blocked: {discrepancies.high_count} unresolved high-risk discrepancy(ies) detected for period {payload.gst_period}. Resolve discrepancies before recording return filing."
+            )
+
     record = GSTRecord(
         id=uuid.uuid4(),
         client_id=payload.client_id,
