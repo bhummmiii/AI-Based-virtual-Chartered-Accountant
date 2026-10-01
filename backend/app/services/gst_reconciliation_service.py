@@ -325,6 +325,7 @@ class GstReconciliationService:
         b2cl_rows: List[GstReconciliationInvoiceItem] = []
         b2cs_rows: List[GstReconciliationInvoiceItem] = []
         cn_rows: List[GstReconciliationInvoiceItem] = []
+        dn_rows: List[GstReconciliationInvoiceItem] = []
 
         for d in filtered_docs:
             is_posted = True
@@ -437,7 +438,10 @@ class GstReconciliationService:
 
             if is_note:
                 row_item.supply_type = "CDNR" if has_gstin else "CDNUR"
-                cn_rows.append(row_item)
+                if d.document_category == "debit_note" or "debit" in (d.invoice_type or "").lower():
+                    dn_rows.append(row_item)
+                else:
+                    cn_rows.append(row_item)
             elif has_gstin:
                 row_item.supply_type = "B2B"
                 b2b_rows.append(row_item)
@@ -470,13 +474,14 @@ class GstReconciliationService:
         b2b_sec = _calc_section_from_rows(b2b_rows, "B2B Invoices (4A, 4B, 4C, 6B, 6C)")
         b2cl_sec = _calc_section_from_rows(b2cl_rows, "B2C (Large) Invoices (5A, 5B)")
         b2cs_sec = _calc_section_from_rows(b2cs_rows, "B2C (Small) Invoices (7)")
-        cn_sec = _calc_section_from_rows(cn_rows, "Credit / Debit Notes (9B)")
+        cn_sec = _calc_section_from_rows(cn_rows, "Credit Notes (9B)")
+        dn_sec = _calc_section_from_rows(dn_rows, "Debit Notes (9B)")
 
         # Gross Outward Turnover = B2B + B2CL + B2CS + Notes
-        tot_outward_taxable = b2b_sec.taxable_amount + b2cl_sec.taxable_amount + b2cs_sec.taxable_amount + cn_sec.taxable_amount
-        tot_outward_cgst = b2b_sec.cgst + b2cl_sec.cgst + b2cs_sec.cgst + cn_sec.cgst
-        tot_outward_sgst = b2b_sec.sgst + b2cl_sec.sgst + b2cs_sec.sgst + cn_sec.sgst
-        tot_outward_igst = b2b_sec.igst + b2cl_sec.igst + b2cs_sec.igst + cn_sec.igst
+        tot_outward_taxable = b2b_sec.taxable_amount + b2cl_sec.taxable_amount + b2cs_sec.taxable_amount + cn_sec.taxable_amount + dn_sec.taxable_amount
+        tot_outward_cgst = b2b_sec.cgst + b2cl_sec.cgst + b2cs_sec.cgst + cn_sec.cgst + dn_sec.cgst
+        tot_outward_sgst = b2b_sec.sgst + b2cl_sec.sgst + b2cs_sec.sgst + cn_sec.sgst + dn_sec.sgst
+        tot_outward_igst = b2b_sec.igst + b2cl_sec.igst + b2cs_sec.igst + cn_sec.igst + dn_sec.igst
         tot_outward_tax = tot_outward_cgst + tot_outward_sgst + tot_outward_igst
 
         # 3. Fetch General Ledger Sales & Output Tax Balances
@@ -554,6 +559,7 @@ class GstReconciliationService:
             b2cl_summary=b2cl_sec,
             b2cs_summary=b2cs_sec,
             credit_notes_summary=cn_sec,
+            debit_notes_summary=dn_sec,
             total_outward_taxable=tot_outward_taxable,
             total_outward_cgst=tot_outward_cgst,
             total_outward_sgst=tot_outward_sgst,
@@ -962,8 +968,24 @@ class GstReconciliationService:
         posted_jes = db.query(JournalEntry).filter(
             JournalEntry.client_id == client_id,
             JournalEntry.status == "posted",
+            JournalEntry.is_reversed == False,
         ).all()
-        doc_posted_map: Dict[uuid.UUID, JournalEntry] = {je.document_id: je for je in posted_jes if je.document_id}
+        doc_posted_map: Dict[uuid.UUID, Any] = {}
+        for je in posted_jes:
+            if je.document_id:
+                doc_posted_map[je.document_id] = je
+            if je.accounting_record_id:
+                rec = db.query(AccountingRecord).filter(AccountingRecord.id == je.accounting_record_id).first()
+                if rec and rec.document_id:
+                    doc_posted_map[rec.document_id] = je
+
+        posted_records = db.query(AccountingRecord).filter(
+            AccountingRecord.client_id == client_id,
+            AccountingRecord.status == "posted",
+        ).all()
+        for ar in posted_records:
+            if ar.document_id and ar.document_id not in doc_posted_map:
+                doc_posted_map[ar.document_id] = ar
 
         seen_invoices: Dict[Tuple[str, str], UploadedDocument] = {}
 
@@ -972,8 +994,21 @@ class GstReconciliationService:
             if cat in ["e_way_bill", "gst_challan", "hsn_sac"]:
                 continue
 
-            # Check 1: Missing GSTIN on B2B documents
             party_name = (d.customer or d.vendor or "").strip()
+            tot_amt = Decimal(str(d.amount or 0.00))
+            taxable = Decimal(str(d.taxable_amount or 0.00))
+            cgst = Decimal(str(d.cgst or 0.00))
+            sgst = Decimal(str(d.sgst or 0.00))
+            igst = Decimal(str(d.igst or 0.00))
+
+            # Tax at risk (Rule R5): Must strictly be tax amount, never gross
+            doc_tax = cgst + sgst + igst + Decimal(str(d.cess or 0.00))
+            if doc_tax == Decimal("0.00") and tot_amt > taxable and taxable > Decimal("0.00"):
+                doc_tax = tot_amt - taxable
+            elif doc_tax == Decimal("0.00") and tot_amt > Decimal("0.00"):
+                doc_tax = (tot_amt * Decimal("18") / Decimal("118")).quantize(Decimal("0.01"))
+
+            # Check 1: Missing GSTIN on B2B documents
             is_b2b = d.document_category == "b2b_invoice" or any(
                 corp in party_name.lower() for corp in ["ltd", "pvt", "limited", "corp", "llp", "inc"]
             )
@@ -989,18 +1024,12 @@ class GstReconciliationService:
                     document_id=d.id,
                     invoice_number=d.invoice_number,
                     party_name=party_name,
-                    variance_amount=Decimal(str(d.amount or 0.00)),
+                    variance_amount=doc_tax,
                     statutory_reference="Section 31 & Rule 46 CGST Rules (Tax Invoice requirements)",
                     recommended_action="Obtain recipient/vendor GSTIN to ensure eligibility under Section 16(2)(aa).",
                 ))
 
             # Check 2: Mathematical tax calculation variance
-            taxable = Decimal(str(d.taxable_amount or 0.00))
-            cgst = Decimal(str(d.cgst or 0.00))
-            sgst = Decimal(str(d.sgst or 0.00))
-            igst = Decimal(str(d.igst or 0.00))
-            tot_amt = Decimal(str(d.amount or 0.00))
-
             if tot_amt > 0 and taxable > 0:
                 expected_tot = taxable + cgst + sgst + igst
                 variance = abs(tot_amt - expected_tot)
@@ -1031,10 +1060,26 @@ class GstReconciliationService:
                         document_id=d.id,
                         invoice_number=d.invoice_number,
                         party_name=party_name,
-                        variance_amount=tot_amt,
+                        variance_amount=doc_tax,
                         statutory_reference="Section 128 Companies Act (Books of Account maintenance)",
                         recommended_action="Post the document draft voucher to General Ledger to update accounting balances.",
                     ))
+
+            # Check 3b: Blocked / Needs Review Documents (D5)
+            if getattr(d, "status", "") in ("needs_review", "blocked"):
+                discrepancies.append(GstDiscrepancyItem(
+                    discrepancy_id=f"DISC-REVIEW-{d.id}",
+                    rule_code="NEEDS_REVIEW",
+                    severity="HIGH",
+                    title="Document Blocked / Requires CA Review",
+                    description=f"Document #{d.invoice_number or 'UNKNOWN'} ({d.document_category}) requires statutory review before posting.",
+                    document_id=d.id,
+                    invoice_number=d.invoice_number,
+                    party_name=party_name,
+                    variance_amount=doc_tax,
+                    statutory_reference="Statutory Pre-Posting Validation Gate",
+                    recommended_action="Resolve orientation or mismatch error in Document Review workspace.",
+                ))
 
             # Check 4: Duplicate Invoices
             inv_num = (d.invoice_number or "").strip().upper()
@@ -1097,7 +1142,6 @@ class GstReconciliationService:
             if je.document_id:
                 doc = db.query(UploadedDocument).filter(UploadedDocument.id == je.document_id).first()
             elif je.accounting_record_id:
-                from app.models.accounting_record import AccountingRecord
                 ar = db.query(AccountingRecord).filter(AccountingRecord.id == je.accounting_record_id).first()
                 if ar and ar.document_id:
                     doc = db.query(UploadedDocument).filter(UploadedDocument.id == ar.document_id).first()

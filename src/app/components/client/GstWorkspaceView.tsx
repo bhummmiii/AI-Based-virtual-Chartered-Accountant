@@ -448,6 +448,8 @@ export function GstWorkspaceView({
             <p className="mt-1 text-xs text-muted-foreground">
               {highRiskCount > 0 ? (
                 <span className="text-destructive font-medium">{highRiskCount} High-Severity action items</span>
+              ) : totalDiscrepancies > 0 ? (
+                <span className="text-amber-500 font-medium">{totalDiscrepancies} Action items requiring review</span>
               ) : (
                 <span className="text-muted-foreground">All vouchers matched</span>
               )}
@@ -623,7 +625,7 @@ export function GstWorkspaceView({
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
                     <span>
-                      <strong className="text-foreground">Reconciliation Parity:</strong> B2B Supplies ({formatGstCurrency(gstr1Data?.b2b_summary?.taxable_amount || 0)}) + B2CS Supplies ({formatGstCurrency(gstr1Data?.b2cs_summary?.taxable_amount || 0)}) − Credit Notes ({formatGstCurrency(gstr1Data?.credit_notes_summary?.taxable_amount || 0)}) = Net Taxable <strong className="text-foreground">{formatGstCurrency(outwardTaxable)}</strong>.
+                      <strong className="text-foreground">Reconciliation Parity:</strong> B2B Supplies ({formatGstCurrency(gstr1Data?.b2b_summary?.taxable_amount || 0)}) + B2CL Supplies ({formatGstCurrency(gstr1Data?.b2cl_summary?.taxable_amount || 0)}) + B2CS Supplies ({formatGstCurrency(gstr1Data?.b2cs_summary?.taxable_amount || 0)}) − Credit Notes ({formatGstCurrency(Math.abs(Number(gstr1Data?.credit_notes_summary?.taxable_amount || 0)))}) + Debit Notes ({formatGstCurrency(gstr1Data?.debit_notes_summary?.taxable_amount || 0)}) = Net Taxable <strong className="text-foreground">{formatGstCurrency(outwardTaxable)}</strong>.
                     </span>
                   </div>
                   <span className="font-mono text-emerald-600 dark:text-emerald-400 font-medium">

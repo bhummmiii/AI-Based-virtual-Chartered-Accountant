@@ -55,6 +55,7 @@ class Gstr1ReconciliationResponse(BaseModel):
     b2cl_summary: Gstr1SectionSummary
     b2cs_summary: Gstr1SectionSummary
     credit_notes_summary: Gstr1SectionSummary
+    debit_notes_summary: Optional[Gstr1SectionSummary] = None
     total_outward_taxable: Decimal = Decimal("0.00")
     total_outward_cgst: Decimal = Decimal("0.00")
     total_outward_sgst: Decimal = Decimal("0.00")
