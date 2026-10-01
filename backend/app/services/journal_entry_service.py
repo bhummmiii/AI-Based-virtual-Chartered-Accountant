@@ -61,6 +61,7 @@ class JournalEntryService:
             "receipt": "RCT",
             "contra": "CN",
             "journal": "JV",
+            "reversal": "REV",
         }
         prefix = type_prefix_map.get(entry_type.lower(), "JV")
         year_str = str(date.today().year)
@@ -75,7 +76,14 @@ class JournalEntryService:
             or 0
         )
         seq = count + 1
-        return f"{prefix}-{year_str}-{seq:04d}"
+        candidate = f"{prefix}-{year_str}-{seq:04d}"
+        while db.query(JournalEntry).filter(
+            JournalEntry.client_id == client_id,
+            JournalEntry.entry_number == candidate,
+        ).first():
+            seq += 1
+            candidate = f"{prefix}-{year_str}-{seq:04d}"
+        return candidate
 
     @classmethod
     def create_journal_entry(

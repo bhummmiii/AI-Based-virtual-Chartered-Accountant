@@ -955,6 +955,51 @@ class GstReconciliationService:
                 recommended_action="Attach supporting tax invoice or challan to ensure audit trail integrity.",
             ))
 
+        # Check 6: Legacy Vouchers Missing Statutory Tax Lines (D2)
+        # Find posted vouchers whose source document has tax, but whose lines lack GST accounts
+        for je in posted_jes:
+            if je.entry_type == "reversal" or je.status == "reversed":
+                continue
+            doc = None
+            if je.document_id:
+                doc = db.query(UploadedDocument).filter(UploadedDocument.id == je.document_id).first()
+            elif je.accounting_record_id:
+                from app.models.accounting_record import AccountingRecord
+                ar = db.query(AccountingRecord).filter(AccountingRecord.id == je.accounting_record_id).first()
+                if ar and ar.document_id:
+                    doc = db.query(UploadedDocument).filter(UploadedDocument.id == ar.document_id).first()
+
+            if not doc:
+                continue
+
+            doc_tax = Decimal(str((doc.cgst or 0) + (doc.sgst or 0) + (doc.igst or 0) + (doc.cess or 0)))
+            if doc_tax > Decimal("0.00"):
+                has_gst_line = False
+                for line in je.lines:
+                    if line.account:
+                        if line.account.role in ("OUTPUT_CGST", "OUTPUT_SGST", "OUTPUT_IGST", "INPUT_CGST", "INPUT_SGST", "INPUT_IGST"):
+                            has_gst_line = True
+                            break
+                        if line.account.account_code in ("2110", "2120", "2130", "1210", "1220", "1230", "1060", "1070", "1080", "2020", "2030", "2040"):
+                            has_gst_line = True
+                            break
+
+                if not has_gst_line:
+                    discrepancies.append(GstDiscrepancyItem(
+                        discrepancy_id=f"DISC-LEGACY-{je.id}",
+                        rule_code="LEGACY_VOUCHER_NO_TAX_LINES",
+                        severity="HIGH",
+                        title="Legacy Voucher Missing Statutory Tax Lines",
+                        description=f"Voucher #{je.entry_number} for document #{doc.invoice_number or 'UNKNOWN'} has document tax (₹{doc_tax}) but voucher lines lack GST accounts.",
+                        document_id=doc.id,
+                        voucher_id=je.id,
+                        invoice_number=doc.invoice_number,
+                        party_name=(doc.customer or doc.vendor or "").strip(),
+                        variance_amount=doc_tax,
+                        statutory_reference="Section 31 & Section 16 CGST Act (Statutory GST Account Posting)",
+                        recommended_action="Run repost_legacy_vouchers.py to void legacy entry and post balanced T1-T6 voucher.",
+                    ))
+
         high_c = sum(1 for d in discrepancies if d.severity == "HIGH")
         med_c = sum(1 for d in discrepancies if d.severity == "MEDIUM")
         low_c = sum(1 for d in discrepancies if d.severity == "LOW")

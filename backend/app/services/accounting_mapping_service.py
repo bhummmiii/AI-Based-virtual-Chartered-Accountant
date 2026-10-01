@@ -50,6 +50,7 @@ class AccountingMappingService:
         db: Session,
         doc: UploadedDocument,
         user: User,
+        allow_client_mismatch: bool = False,
     ) -> JournalEntryCreate:
         """
         Translate a verified UploadedDocument into a strictly balanced JournalEntryCreate payload.
@@ -62,6 +63,16 @@ class AccountingMappingService:
             raise BadRequestException(detail=f"Document {doc.id} must have an amount greater than 0")
 
         acc_map = cls.get_or_init_client_accounts(db, doc.client_id, user)
+        accounts_list = list(acc_map.values())
+
+        def get_acc(role_name: str, *fallback_codes: str) -> Optional[ChartOfAccounts]:
+            for a in accounts_list:
+                if getattr(a, "role", None) == role_name:
+                    return a
+            for code in fallback_codes:
+                if code in acc_map:
+                    return acc_map[code]
+            return None
 
         from app.models.client import Client
         client = db.query(Client).filter(Client.id == doc.client_id).first()
@@ -118,7 +129,7 @@ class AccountingMappingService:
         doc_gstin = (doc.gstin or "").strip().upper()
 
         # C3: Check Client GSTIN Anchor & CLIENT_MISMATCH
-        if client_gstin:
+        if client_gstin and not allow_client_mismatch:
             if meta_supplier_gstin and meta_customer_gstin:
                 if meta_supplier_gstin != client_gstin and meta_customer_gstin != client_gstin:
                     raise BadRequestException(
@@ -257,12 +268,12 @@ class AccountingMappingService:
         )) and cat not in {"credit_note", "debit_note", "gst_challan"}:
             entry_type = "sales"
             customer_name = doc.customer or "Commercial Customer"
-            debtor_acc = acc_map.get("1100") or acc_map.get("1010")
-            sales_acc = acc_map.get("4010")
-            cgst_acc = acc_map.get("2110")
-            sgst_acc = acc_map.get("2120")
-            igst_acc = acc_map.get("2130")
-            cess_acc = acc_map.get("2140")
+            debtor_acc = get_acc("DEBTORS", "1100", "1010")
+            sales_acc = get_acc("SALES", "4010")
+            cgst_acc = get_acc("OUTPUT_CGST", "2110")
+            sgst_acc = get_acc("OUTPUT_SGST", "2120")
+            igst_acc = get_acc("OUTPUT_IGST", "2130")
+            cess_acc = get_acc("OUTPUT_CESS", "2140")
             round_acc = acc_map.get("5150") or sales_acc
 
             if not debtor_acc or not sales_acc:
@@ -346,12 +357,12 @@ class AccountingMappingService:
         )) and cat not in {"credit_note", "debit_note", "gst_challan"}:
             entry_type = "purchase"
             vendor_name = doc.vendor or "Commercial Vendor"
-            creditor_acc = acc_map.get("2010") or acc_map.get("1010")
-            purchase_acc = acc_map.get("5010")
-            cgst_acc = acc_map.get("1210")
-            sgst_acc = acc_map.get("1220")
-            igst_acc = acc_map.get("1230")
-            cess_acc = acc_map.get("1240")
+            creditor_acc = get_acc("CREDITORS", "2010", "1010")
+            purchase_acc = get_acc("PURCHASE", "5010")
+            cgst_acc = get_acc("INPUT_CGST", "1210")
+            sgst_acc = get_acc("INPUT_SGST", "1220")
+            igst_acc = get_acc("INPUT_IGST", "1230")
+            cess_acc = get_acc("INPUT_CESS", "1240")
             round_acc = acc_map.get("5150") or purchase_acc
 
             if not creditor_acc or not purchase_acc:
@@ -434,12 +445,12 @@ class AccountingMappingService:
             entry_type = "journal"
             if is_outward:
                 customer_name = doc.customer or "Customer"
-                debtor_acc = acc_map.get("1100") or acc_map.get("1010")
-                sales_return_acc = acc_map.get("4020") or acc_map.get("4010")
-                cgst_acc = acc_map.get("2110")
-                sgst_acc = acc_map.get("2120")
-                igst_acc = acc_map.get("2130")
-                cess_acc = acc_map.get("2140")
+                debtor_acc = get_acc("DEBTORS", "1100", "1010")
+                sales_return_acc = get_acc("SALES_RETURN", "4030", "4020", "4010")
+                cgst_acc = get_acc("OUTPUT_CGST", "2110")
+                sgst_acc = get_acc("OUTPUT_SGST", "2120")
+                igst_acc = get_acc("OUTPUT_IGST", "2130")
+                cess_acc = get_acc("OUTPUT_CESS", "2140")
                 round_acc = acc_map.get("5150") or sales_return_acc
 
                 if not debtor_acc or not sales_return_acc:
@@ -513,12 +524,12 @@ class AccountingMappingService:
                 ))
             else:
                 vendor_name = doc.vendor or "Vendor"
-                creditor_acc = acc_map.get("2010") or acc_map.get("1010")
-                purchase_return_acc = acc_map.get("5020") or acc_map.get("5010")
-                cgst_acc = acc_map.get("1210")
-                sgst_acc = acc_map.get("1220")
-                igst_acc = acc_map.get("1230")
-                cess_acc = acc_map.get("1240")
+                creditor_acc = get_acc("CREDITORS", "2010", "1010")
+                purchase_return_acc = get_acc("PURCHASE_RETURN", "5020", "5010")
+                cgst_acc = get_acc("INPUT_CGST", "1210")
+                sgst_acc = get_acc("INPUT_SGST", "1220")
+                igst_acc = get_acc("INPUT_IGST", "1230")
+                cess_acc = get_acc("INPUT_CESS", "1240")
                 round_acc = acc_map.get("5150") or purchase_return_acc
 
                 if not creditor_acc or not purchase_return_acc:
@@ -596,12 +607,12 @@ class AccountingMappingService:
             entry_type = "journal"
             if is_inward:
                 vendor_name = doc.vendor or "Vendor"
-                creditor_acc = acc_map.get("2010") or acc_map.get("1010")
-                purchase_return_acc = acc_map.get("5020") or acc_map.get("5010")
-                cgst_acc = acc_map.get("1210")
-                sgst_acc = acc_map.get("1220")
-                igst_acc = acc_map.get("1230")
-                cess_acc = acc_map.get("1240")
+                creditor_acc = get_acc("CREDITORS", "2010", "1010")
+                purchase_return_acc = get_acc("PURCHASE_RETURN", "5020", "5010")
+                cgst_acc = get_acc("INPUT_CGST", "1210")
+                sgst_acc = get_acc("INPUT_SGST", "1220")
+                igst_acc = get_acc("INPUT_IGST", "1230")
+                cess_acc = get_acc("INPUT_CESS", "1240")
                 round_acc = acc_map.get("5150") or purchase_return_acc
 
                 if not creditor_acc or not purchase_return_acc:
@@ -675,12 +686,12 @@ class AccountingMappingService:
                     ))
             else:
                 customer_name = doc.customer or "Customer"
-                debtor_acc = acc_map.get("1100") or acc_map.get("1010")
-                other_sales_acc = acc_map.get("4030") or acc_map.get("4010")
-                cgst_acc = acc_map.get("2110")
-                sgst_acc = acc_map.get("2120")
-                igst_acc = acc_map.get("2130")
-                cess_acc = acc_map.get("2140")
+                debtor_acc = get_acc("DEBTORS", "1100", "1010")
+                other_sales_acc = get_acc("OTHER_INCOME", "4030", "4010")
+                cgst_acc = get_acc("OUTPUT_CGST", "2110")
+                sgst_acc = get_acc("OUTPUT_SGST", "2120")
+                igst_acc = get_acc("OUTPUT_IGST", "2130")
+                cess_acc = get_acc("OUTPUT_CESS", "2140")
                 round_acc = acc_map.get("5150") or other_sales_acc
 
                 if not debtor_acc or not other_sales_acc:
