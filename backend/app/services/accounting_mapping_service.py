@@ -109,6 +109,7 @@ class AccountingMappingService:
         # ── 2. Decide Direction from Issuer and Client's GSTIN ─────────────────
         meta_supplier_gstin = ""
         meta_customer_gstin = ""
+        meta_orig_inv_no = ""
         if doc.metadata_:
             try:
                 import json
@@ -123,6 +124,7 @@ class AccountingMappingService:
                     return val
                 meta_supplier_gstin = str(_extract("supplier_gstin") or _extract("seller_gstin") or _extract("vendor_gstin") or "").strip().upper()
                 meta_customer_gstin = str(_extract("customer_gstin") or _extract("buyer_gstin") or _extract("recipient_gstin") or "").strip().upper()
+                meta_orig_inv_no = str(_extract("original_invoice_number") or _extract("original_invoice_no") or _extract("against_invoice_number") or _extract("reference_invoice_number") or _extract("ref_invoice_number") or "").strip()
             except Exception:
                 pass
 
@@ -158,48 +160,49 @@ class AccountingMappingService:
             # Notes issued by client or received: resolve sales-side vs purchase-side
             note_side = None
 
-            # (1) Look up referenced original invoice ("Against Invoice X dt Y")
+            # (1) Look up referenced original invoice ("Against Invoice X dt Y" or metadata fields)
             ocr_content = getattr(doc, "ocr_text", "") or ""
             extr_content = getattr(doc, "extracted_text", "") or ""
             raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''}"
-            import re
-            from sqlalchemy import func
-            m_ref = re.search(r"(?:Against|Ref(?:erence)?|Original)\s+(?:Invoice|Inv)?\.?\s*[:\-]?\s*([A-Za-z0-9\/\-_]+)", raw_text_content, re.IGNORECASE)
-            ref_inv_no = m_ref.group(1).strip() if m_ref else ""
+
+            ref_inv_no = meta_orig_inv_no
+            if not ref_inv_no:
+                import re
+                m_ref = re.search(r"(?:Against|Ref(?:erence)?|Original)\s+(?:Invoice|Inv)?\.?\s*[:\-]?\s*([A-Za-z0-9\/\-_]+)", raw_text_content, re.IGNORECASE)
+                ref_inv_no = m_ref.group(1).strip() if m_ref else ""
 
             if ref_inv_no:
+                from sqlalchemy import func
                 orig_doc = db.query(UploadedDocument).filter(
                     UploadedDocument.client_id == doc.client_id,
                     func.upper(UploadedDocument.invoice_number) == ref_inv_no.upper(),
                 ).first()
                 if orig_doc:
                     orig_cat = (orig_doc.document_category or "").lower()
-                    if orig_cat in {"sales_records", "b2c_invoice", "b2b_invoice"} or "sales" in (orig_doc.invoice_type or "").lower():
+                    orig_inv_type = (orig_doc.invoice_type or "").lower()
+                    if orig_cat in {"sales_records", "b2c_invoice", "b2b_invoice", "e_invoice"} or "sales" in orig_inv_type:
                         note_side = "SALES"
-                    elif orig_cat in {"purchase_records"} or "purchase" in (orig_doc.invoice_type or "").lower():
+                    elif orig_cat in {"purchase_records"} or "purchase" in orig_inv_type:
                         note_side = "PURCHASE"
 
-            # (2) Hint from applies_to, category or text
+            # (2) Hint from applies_to, anchor or party
             if not note_side:
                 if getattr(doc, "applies_to", None):
                     applies = str(doc.applies_to).strip().upper()
                     if applies in ("SALES", "PURCHASE"):
                         note_side = applies
-                if not note_side and ("purchase" in cat or "purchase" in raw_text_content.lower() or (doc.invoice_type and "purchase" in doc.invoice_type.lower())):
-                    note_side = "PURCHASE"
-                elif "sales" in cat or "sales" in raw_text_content.lower() or (doc.invoice_type and "sales" in doc.invoice_type.lower()):
+                if not note_side and meta_supplier_gstin and client_gstin and meta_supplier_gstin == client_gstin:
                     note_side = "SALES"
-                elif meta_customer_gstin and client_gstin and meta_customer_gstin == client_gstin:
+                elif not note_side and meta_customer_gstin and client_gstin and meta_customer_gstin == client_gstin:
                     note_side = "PURCHASE"
-                elif meta_supplier_gstin and client_gstin and meta_supplier_gstin == client_gstin:
-                    if cat == "credit_note":
-                        note_side = "SALES"
-                    else:
-                        note_side = "PURCHASE"
-                elif doc.customer and not doc.vendor:
+                elif not note_side and doc.customer and not doc.vendor:
                     note_side = "SALES"
-                elif doc.vendor and not doc.customer:
+                elif not note_side and doc.vendor and not doc.customer:
                     note_side = "PURCHASE"
+                elif not note_side and ("purchase" in cat or "purchase" in raw_text_content.lower() or (doc.invoice_type and "purchase" in doc.invoice_type.lower())):
+                    note_side = "PURCHASE"
+                elif not note_side and ("sales" in cat or "sales" in raw_text_content.lower() or (doc.invoice_type and "sales" in doc.invoice_type.lower())):
+                    note_side = "SALES"
                 elif cat == "credit_note":
                     note_side = "SALES"
                 else:

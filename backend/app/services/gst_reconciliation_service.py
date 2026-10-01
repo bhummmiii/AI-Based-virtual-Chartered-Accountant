@@ -86,17 +86,55 @@ class GstReconciliationService:
         cls,
         doc: UploadedDocument,
         client_gstin: str,
+        db: Optional[Session] = None,
     ) -> str:
         """
-        Decide direction ('OUTWARD' or 'INWARD') from the issuer and the client's GSTIN.
-        Statutory GST logic:
-        - If issuer (supplier) GSTIN == client's GSTIN -> OUTWARD supply.
-        - If recipient (customer) GSTIN == client's GSTIN -> INWARD supply.
-        - If issuer (supplier) GSTIN != client's GSTIN -> INWARD supply.
-        Fallback to document_category and invoice_type if GSTINs are absent.
+        Decide statutory GST direction ('OUTWARD' or 'INWARD') anchored on client's GSTIN,
+        posted voucher lines (R6), or referenced original invoice for credit/debit notes.
+        Never falls back to upload category.
         """
+        # 1. Posted Voucher Check (Rule R6: ledger line roles define direction)
+        if db and doc.id:
+            from app.models.journal_entry import JournalEntry
+            je = (
+                db.query(JournalEntry)
+                .filter(
+                    JournalEntry.document_id == doc.id,
+                    JournalEntry.status == "posted",
+                    JournalEntry.is_reversed == False,
+                )
+                .first()
+            )
+            if je:
+                outward_roles = {
+                    "OUTPUT_CGST", "OUTPUT_SGST", "OUTPUT_IGST", "OUTPUT_CESS",
+                    "SALES", "SALES_RETURN", "OTHER_INCOME",
+                }
+                inward_roles = {
+                    "INPUT_CGST", "INPUT_SGST", "INPUT_IGST", "INPUT_CESS",
+                    "PURCHASE", "PURCHASE_RETURN",
+                }
+                has_outward = False
+                has_inward = False
+                for line in je.lines:
+                    acc = line.account
+                    role = (acc.role if acc else None) or (
+                        determine_account_role(acc.account_code, acc.account_name, acc.account_type)
+                        if acc else None
+                    )
+                    if role in outward_roles:
+                        has_outward = True
+                    elif role in inward_roles:
+                        has_inward = True
+                if has_outward and not has_inward:
+                    return "OUTWARD"
+                elif has_inward and not has_outward:
+                    return "INWARD"
+
+        # 2. Metadata Extraction
         meta_supplier_gstin = ""
         meta_customer_gstin = ""
+        meta_orig_inv_no = ""
         if doc.metadata_:
             try:
                 import json
@@ -111,6 +149,7 @@ class GstReconciliationService:
                     return val
                 meta_supplier_gstin = str(_extract("supplier_gstin") or _extract("seller_gstin") or _extract("vendor_gstin") or "").strip().upper()
                 meta_customer_gstin = str(_extract("customer_gstin") or _extract("buyer_gstin") or _extract("recipient_gstin") or "").strip().upper()
+                meta_orig_inv_no = str(_extract("original_invoice_number") or _extract("original_invoice_no") or _extract("against_invoice_number") or _extract("reference_invoice_number") or _extract("ref_invoice_number") or "").strip()
             except Exception:
                 pass
 
@@ -118,40 +157,68 @@ class GstReconciliationService:
         cat = (doc.document_category or "").lower()
         inv_type = (doc.invoice_type or "").lower()
 
-        # Resolve issuer GSTIN
-        issuer_gstin = meta_supplier_gstin
-        if not issuer_gstin:
-            if cat in {"purchase_records"} or "purchase" in inv_type:
-                issuer_gstin = doc_gstin
-            elif cat in {"sales_records", "b2c_invoice"} or "sales" in inv_type:
-                issuer_gstin = client_gstin
-            else:
-                if doc_gstin and client_gstin and doc_gstin == client_gstin:
-                    issuer_gstin = client_gstin
-                elif doc_gstin and client_gstin and doc_gstin != client_gstin:
-                    if doc.vendor and not doc.customer:
-                        issuer_gstin = doc_gstin
-                    elif doc.customer and not doc.vendor:
-                        issuer_gstin = client_gstin
-                    else:
-                        issuer_gstin = doc_gstin
-                else:
-                    issuer_gstin = client_gstin if cat in {"sales_records", "b2c_invoice", "credit_note"} else doc_gstin
+        # 3. For Credit / Debit Notes: Resolve via original invoice reference or applies_to
+        if cat in {"credit_note", "debit_note"}:
+            ref_inv = meta_orig_inv_no
+            if not ref_inv:
+                ocr_content = getattr(doc, "ocr_text", "") or ""
+                extr_content = getattr(doc, "extracted_text", "") or ""
+                raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''}"
+                import re
+                m_ref = re.search(r"(?:Against|Ref(?:erence)?|Original)\s+(?:Invoice|Inv)?\.?\s*[:\-]?\s*([A-Za-z0-9\/\-_]+)", raw_text_content, re.IGNORECASE)
+                ref_inv = m_ref.group(1).strip() if m_ref else ""
 
-        if issuer_gstin and client_gstin:
-            return "OUTWARD" if issuer_gstin == client_gstin else "INWARD"
-        if meta_customer_gstin and client_gstin:
-            return "INWARD" if meta_customer_gstin == client_gstin else "OUTWARD"
+            if ref_inv and db:
+                from sqlalchemy import func
+                orig_doc = db.query(UploadedDocument).filter(
+                    UploadedDocument.client_id == doc.client_id,
+                    func.upper(UploadedDocument.invoice_number) == ref_inv.upper(),
+                ).first()
+                if orig_doc:
+                    orig_cat = (orig_doc.document_category or "").lower()
+                    orig_inv_t = (orig_doc.invoice_type or "").lower()
+                    if orig_cat in {"sales_records", "b2c_invoice", "b2b_invoice", "e_invoice"} or "sales" in orig_inv_t:
+                        return "OUTWARD"
+                    elif orig_cat in {"purchase_records"} or "purchase" in orig_inv_t:
+                        return "INWARD"
 
-        # Fallback by category / invoice_type
-        if cat in {"sales_records", "b2c_invoice"} or "sales" in inv_type:
+            # Check CA applies_to override
+            if getattr(doc, "applies_to", None):
+                applies = str(doc.applies_to).strip().upper()
+                if applies in ("SALES", "OUTWARD"):
+                    return "OUTWARD"
+                elif applies in ("PURCHASE", "INWARD"):
+                    return "INWARD"
+
+            # Check client anchor
+            if client_gstin:
+                if meta_supplier_gstin and meta_supplier_gstin == client_gstin:
+                    return "OUTWARD"
+                elif meta_customer_gstin and meta_customer_gstin == client_gstin:
+                    return "INWARD"
+
+            # Party names fallback
+            if doc.customer and not doc.vendor:
+                return "OUTWARD"
+            if doc.vendor and not doc.customer:
+                return "INWARD"
+            if cat == "credit_note":
+                return "OUTWARD"
+            if doc.customer and doc.vendor:
+                return "OUTWARD"
+
+        # 4. Standard Documents: Strict Client GSTIN Anchor
+        if meta_supplier_gstin and client_gstin and meta_supplier_gstin == client_gstin:
             return "OUTWARD"
-        if cat in {"purchase_records"} or "purchase" in inv_type:
+        if meta_customer_gstin and client_gstin and meta_customer_gstin == client_gstin:
             return "INWARD"
-        if cat == "credit_note":
+
+        # Fallback by invoice_type or category
+        if "sales" in inv_type or cat in {"sales_records", "b2c_invoice"}:
             return "OUTWARD"
-        if cat == "debit_note":
+        if "purchase" in inv_type or cat in {"purchase_records"}:
             return "INWARD"
+
         if cat in {"b2b_invoice", "e_invoice"}:
             return "INWARD" if "purchase" in inv_type else "OUTWARD"
 
@@ -211,11 +278,19 @@ class GstReconciliationService:
                 continue
 
             # Decide direction from issuer and client GSTIN
-            direction = cls.determine_document_direction(d, client_gstin)
+            direction = cls.determine_document_direction(d, client_gstin, db=db)
             if direction != "OUTWARD":
                 continue
 
             je = posted_je_map[d.id]
+            # Exclude purchase vouchers from outward register
+            has_purchase_lines = any(
+                ((l.account.role if l.account else None) or determine_account_role(l.account.account_code, l.account.account_name, l.account.account_type) if l.account else None) in ("PURCHASE", "PURCHASE_RETURN", "INPUT_CGST", "INPUT_SGST", "INPUT_IGST")
+                for l in je.lines
+            )
+            if has_purchase_lines:
+                continue
+
             d_date = je.entry_date
             if not d_date and d.invoice_date:
                 try:
@@ -287,17 +362,57 @@ class GstReconciliationService:
 
             # Supply type classification
             is_note = d.document_category in ("credit_note", "debit_note")
-            has_gstin = bool(d.gstin and len(d.gstin.strip()) >= 15)
 
-            # Recipient GSTIN: Blank for unregistered recipients (B2C)
-            recipient_gstin = d.gstin if has_gstin else ""
+            # Recipient GSTIN: In outward supplies, recipient is the buyer/customer.
+            # Never display seller's GSTIN in Party GSTIN column (D6).
+            meta_customer_gst = ""
+            meta_supplier_gst = ""
+            pos_state = ""
+            if d.metadata_:
+                try:
+                    import json
+                    m = json.loads(d.metadata_)
+                    fields = m.get("fields") if isinstance(m, dict) else {}
+                    if not isinstance(fields, dict):
+                        fields = m if isinstance(m, dict) else {}
+                    def _e(k):
+                        v = fields.get(k)
+                        return v.get("value") if isinstance(v, dict) else v
+                    meta_customer_gst = str(_e("customer_gstin") or _e("buyer_gstin") or _e("recipient_gstin") or "").strip().upper()
+                    meta_supplier_gst = str(_e("supplier_gstin") or _e("seller_gstin") or _e("vendor_gstin") or "").strip().upper()
+                    pos_state = str(_e("place_of_supply_code") or _e("customer_state_code") or "").strip()
+                except Exception:
+                    pass
+
+            doc_g = (d.gstin or "").strip().upper()
+            recipient_gstin = ""
+            if meta_customer_gst and len(meta_customer_gst) == 15 and meta_customer_gst != client_gstin:
+                recipient_gstin = meta_customer_gst
+            elif (
+                doc_g
+                and len(doc_g) == 15
+                and doc_g != client_gstin
+                and doc_g != meta_supplier_gst
+                and d.document_category not in ("b2c_invoice", "sales_records")
+                and "unregistered" not in (d.customer or "").lower()
+            ):
+                recipient_gstin = doc_g
+
+            has_gstin = bool(recipient_gstin and len(recipient_gstin) == 15)
+
+            # Customer name
+            customer_party = d.customer or d.vendor or ""
+            if d.customer and "(From)" not in d.customer:
+                customer_party = d.customer
+            elif d.vendor and "(From)" not in d.vendor and d.vendor != "Entered Date":
+                customer_party = d.vendor
 
             row_item = GstReconciliationInvoiceItem(
                 document_id=d.id,
                 voucher_id=voucher_id,
                 invoice_number=d.invoice_number or "UNASSIGNED",
                 invoice_date=d.invoice_date,
-                party_name=d.customer or d.vendor,
+                party_name=customer_party,
                 party_gstin=recipient_gstin,
                 document_category=d.document_category,
                 taxable_amount=v_taxable,
@@ -312,13 +427,18 @@ class GstReconciliationService:
                 reconciliation_status="matched",
             )
 
+            client_state = client_gstin[:2] if len(client_gstin) >= 2 and client_gstin[:2].isdigit() else ""
+            if recipient_gstin and len(recipient_gstin) >= 2 and recipient_gstin[:2].isdigit():
+                pos_state = recipient_gstin[:2]
+            is_inter_state = (v_igst > Decimal("0.00")) or bool(pos_state and client_state and pos_state != client_state)
+
             if is_note:
                 row_item.supply_type = "CDNR" if has_gstin else "CDNUR"
                 cn_rows.append(row_item)
             elif has_gstin:
                 row_item.supply_type = "B2B"
                 b2b_rows.append(row_item)
-            elif (v_igst > Decimal("0.00") or (d.metadata_ and "place_of_supply" in d.metadata_ and "27" not in d.metadata_)) and v_total > b2c_large_threshold:
+            elif is_inter_state and v_total > b2c_large_threshold:
                 row_item.supply_type = "B2CL"
                 b2cl_rows.append(row_item)
             else:
@@ -372,6 +492,7 @@ class GstReconciliationService:
         ).filter(
             JournalEntry.client_id == client_id,
             JournalEntry.status == "posted",
+            JournalEntry.is_reversed == False,
         )
 
         if start_d:
@@ -495,11 +616,19 @@ class GstReconciliationService:
                 continue
 
             # Decide direction from issuer and client GSTIN
-            direction = cls.determine_document_direction(d, client_gstin)
+            direction = cls.determine_document_direction(d, client_gstin, db=db)
             if direction != "INWARD":
                 continue
 
             je = posted_je_map[d.id]
+            # Sales-side notes or documents must never appear in purchase register (D3)
+            has_sales_lines = any(
+                ((l.account.role if l.account else None) or determine_account_role(l.account.account_code, l.account.account_name, l.account.account_type) if l.account else None) in ("SALES", "SALES_RETURN", "OTHER_INCOME", "OUTPUT_CGST", "OUTPUT_SGST", "OUTPUT_IGST")
+                for l in je.lines
+            )
+            if has_sales_lines:
+                continue
+
             d_date = je.entry_date
             if not d_date and d.invoice_date:
                 try:
@@ -615,6 +744,7 @@ class GstReconciliationService:
         ).filter(
             JournalEntry.client_id == client_id,
             JournalEntry.status == "posted",
+            JournalEntry.is_reversed == False,
         )
 
         if start_d:
