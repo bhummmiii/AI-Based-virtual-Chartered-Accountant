@@ -520,16 +520,21 @@ class AccountingDraftService:
                 audit_user = user or User(id=uuid.uuid4(), role="admin", full_name="FinLedger System", email="system@finledger.local")
                 if record.document_id:
                     doc = db.query(UploadedDocument).filter(UploadedDocument.id == record.document_id).first()
-                    if doc:
-                        je_payload = AccountingMappingService.map_document_to_journal_entry(db, doc, audit_user)
-                        je_payload.accounting_record_id = record.id
-                        je_obj = JournalEntryService.create_journal_entry(
-                            db=db,
-                            client_id=record.client_id,
-                            payload=je_payload,
-                            user=audit_user,
-                            auto_commit=False,
+                    if not doc:
+                        raise NotFoundException(detail=f"Source document {record.document_id} not found")
+                    if getattr(doc, "status", "") in ("needs_review", "blocked") or getattr(doc, "invoice_type", "") == "needs_review":
+                        raise BadRequestException(
+                            detail=f"Posting blocked: Source document #{doc.invoice_number or doc.id} has status '{doc.status}' and requires CA review before posting."
                         )
+                    je_payload = AccountingMappingService.map_document_to_journal_entry(db, doc, audit_user)
+                    je_payload.accounting_record_id = record.id
+                    je_obj = JournalEntryService.create_journal_entry(
+                        db=db,
+                        client_id=record.client_id,
+                        payload=je_payload,
+                        user=audit_user,
+                        auto_commit=False,
+                    )
 
                 # B. If no document or mapping didn't run, create a balanced journal entry from flat record
                 if not je_obj and (record.debit > Decimal("0") or record.credit > Decimal("0")):

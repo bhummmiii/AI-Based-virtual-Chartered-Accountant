@@ -150,6 +150,10 @@ class JournalEntryService:
             doc_exists = db.query(UploadedDocument).filter(UploadedDocument.id == payload.document_id).first()
             if not doc_exists:
                 raise NotFoundException(detail=f"Source document {payload.document_id} not found")
+            if getattr(doc_exists, "status", "") in ("needs_review", "blocked") or getattr(doc_exists, "invoice_type", "") == "needs_review":
+                raise BadRequestException(
+                    detail=f"Posting blocked: Source document {payload.document_id} has status '{doc_exists.status}' and requires statutory review before posting."
+                )
 
         # 2. Collect and validate all referenced accounts
         account_ids = {line.account_id for line in payload.lines}
