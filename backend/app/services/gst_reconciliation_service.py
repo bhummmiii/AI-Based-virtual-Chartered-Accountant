@@ -19,6 +19,7 @@ from app.models.journal_entry import JournalEntry, JournalEntryLine
 from app.models.chart_of_accounts import ChartOfAccounts
 from app.models.accounting_record import AccountingRecord
 from app.models.gst_record import GSTRecord
+from app.services.chart_of_accounts_service import determine_account_role
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException
 from app.schemas.gst_reconciliation import (
     GstReconciliationInvoiceItem,
@@ -261,23 +262,24 @@ class GstReconciliationService:
             v_debtor = Decimal("0.00")
 
             for line in je.lines:
-                code = line.account.account_code if line.account else ""
+                acc = line.account
+                role = (acc.role if acc else None) or (determine_account_role(acc.account_code, acc.account_name, acc.account_type) if acc else None)
                 dr = Decimal(str(line.debit_amount or 0.00))
                 cr = Decimal(str(line.credit_amount or 0.00))
                 net_cr = cr - dr
                 net_dr = dr - cr
 
-                if code in ["4010", "4020", "4030"]:  # Sales Revenue / Return / Other Income
+                if role in ("SALES", "OTHER_INCOME", "SALES_RETURN"):
                     v_taxable += net_cr
-                elif code in ["2110", "2020"]:  # Output CGST
+                elif role == "OUTPUT_CGST":
                     v_cgst += net_cr
-                elif code in ["2120", "2030"]:  # Output SGST
+                elif role == "OUTPUT_SGST":
                     v_sgst += net_cr
-                elif code in ["2130", "2040"]:  # Output IGST
+                elif role == "OUTPUT_IGST":
                     v_igst += net_cr
-                elif code in ["2140"]:  # Output Cess
+                elif role == "OUTPUT_CESS":
                     v_cess += net_cr
-                elif code in ["1100", "1010"]:  # Debtor (Receivable)
+                elif role == "DEBTORS":
                     v_debtor += net_dr
 
             v_tax = v_cgst + v_sgst + v_igst + v_cess
@@ -356,8 +358,11 @@ class GstReconciliationService:
 
         # 3. Fetch General Ledger Sales & Output Tax Balances
         je_line_q = db.query(
+            ChartOfAccounts.id,
             ChartOfAccounts.account_code,
+            ChartOfAccounts.account_name,
             ChartOfAccounts.account_type,
+            ChartOfAccounts.role,
             func.sum(JournalEntryLine.debit_amount).label("sum_debit"),
             func.sum(JournalEntryLine.credit_amount).label("sum_credit"),
         ).join(
@@ -375,7 +380,11 @@ class GstReconciliationService:
             je_line_q = je_line_q.filter(JournalEntry.entry_date <= end_d)
 
         je_balances = je_line_q.group_by(
-            ChartOfAccounts.account_code, ChartOfAccounts.account_type
+            ChartOfAccounts.id,
+            ChartOfAccounts.account_code,
+            ChartOfAccounts.account_name,
+            ChartOfAccounts.account_type,
+            ChartOfAccounts.role,
         ).all()
 
         ledger_sales = Decimal("0.00")
@@ -384,18 +393,19 @@ class GstReconciliationService:
         ledger_igst = Decimal("0.00")
 
         for row in je_balances:
-            code = row.account_code
+            role = row.role or determine_account_role(row.account_code, row.account_name, row.account_type)
             dr = Decimal(str(row.sum_debit or 0.00))
             cr = Decimal(str(row.sum_credit or 0.00))
 
-            if code in ["4010", "4020", "4030"]:
-                # Revenue net balance = Credit - Debit
+            if role in ("SALES", "OTHER_INCOME"):
                 ledger_sales += (cr - dr)
-            elif code in ["2110", "2020"]:  # Output CGST
+            elif role == "SALES_RETURN":
+                ledger_sales -= (dr - cr)
+            elif role == "OUTPUT_CGST":
                 ledger_cgst += (cr - dr)
-            elif code in ["2120", "2030"]:  # Output SGST
+            elif role == "OUTPUT_SGST":
                 ledger_sgst += (cr - dr)
-            elif code in ["2130", "2040"]:  # Output IGST
+            elif role == "OUTPUT_IGST":
                 ledger_igst += (cr - dr)
 
         ledger_tot_tax = ledger_cgst + ledger_sgst + ledger_igst
@@ -531,23 +541,26 @@ class GstReconciliationService:
             v_total = Decimal("0.00")
 
             for line in je.lines:
-                code = line.account.account_code if line.account else ""
+                acc = line.account
+                role = (acc.role if acc else None) or (determine_account_role(acc.account_code, acc.account_name, acc.account_type) if acc else None)
                 dr = Decimal(str(line.debit_amount or 0.00))
                 cr = Decimal(str(line.credit_amount or 0.00))
                 net_dr = dr - cr
                 net_cr = cr - dr
 
-                if code in ["5010", "5020"]:  # Purchase Expense / Return
+                if role == "PURCHASE":
                     v_taxable += net_dr
-                elif code in ["1210", "1060"]:  # Input CGST
+                elif role == "PURCHASE_RETURN":
+                    v_taxable -= net_cr
+                elif role == "INPUT_CGST":
                     v_cgst += net_dr
-                elif code in ["1220", "1070"]:  # Input SGST
+                elif role == "INPUT_SGST":
                     v_sgst += net_dr
-                elif code in ["1230", "1080"]:  # Input IGST
+                elif role == "INPUT_IGST":
                     v_igst += net_dr
-                elif code in ["1240"]:
+                elif role == "INPUT_CESS":
                     v_cess += net_dr
-                elif code in ["2010"]:  # Creditor (payable)
+                elif role == "CREDITORS":
                     v_total += net_cr
 
             v_tax = v_cgst + v_sgst + v_igst + v_cess
@@ -588,7 +601,11 @@ class GstReconciliationService:
 
         # Fetch GL Input Tax balances
         je_line_q = db.query(
+            ChartOfAccounts.id,
             ChartOfAccounts.account_code,
+            ChartOfAccounts.account_name,
+            ChartOfAccounts.account_type,
+            ChartOfAccounts.role,
             func.sum(JournalEntryLine.debit_amount).label("sum_debit"),
             func.sum(JournalEntryLine.credit_amount).label("sum_credit"),
         ).join(
@@ -598,7 +615,6 @@ class GstReconciliationService:
         ).filter(
             JournalEntry.client_id == client_id,
             JournalEntry.status == "posted",
-            ChartOfAccounts.account_code.in_(["1210", "1220", "1230", "1060", "1070", "1080"]),
         )
 
         if start_d:
@@ -606,22 +622,28 @@ class GstReconciliationService:
         if end_d:
             je_line_q = je_line_q.filter(JournalEntry.entry_date <= end_d)
 
-        je_tax_rows = je_line_q.group_by(ChartOfAccounts.account_code).all()
+        je_tax_rows = je_line_q.group_by(
+            ChartOfAccounts.id,
+            ChartOfAccounts.account_code,
+            ChartOfAccounts.account_name,
+            ChartOfAccounts.account_type,
+            ChartOfAccounts.role,
+        ).all()
 
         ledger_in_cgst = Decimal("0.00")
         ledger_in_sgst = Decimal("0.00")
         ledger_in_igst = Decimal("0.00")
 
         for row in je_tax_rows:
-            code = row.account_code
+            role = row.role or determine_account_role(row.account_code, row.account_name, row.account_type)
             dr = Decimal(str(row.sum_debit or 0.00))
             cr = Decimal(str(row.sum_credit or 0.00))
             net_dr = dr - cr  # Input tax is an asset (Debit - Credit)
-            if code in ["1210", "1060"]:
+            if role == "INPUT_CGST":
                 ledger_in_cgst += net_dr
-            elif code in ["1220", "1070"]:
+            elif role == "INPUT_SGST":
                 ledger_in_sgst += net_dr
-            elif code in ["1230", "1080"]:
+            elif role == "INPUT_IGST":
                 ledger_in_igst += net_dr
 
         ledger_tot_input_tax = ledger_in_cgst + ledger_in_sgst + ledger_in_igst

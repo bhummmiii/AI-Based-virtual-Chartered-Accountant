@@ -17,6 +17,7 @@ class AccountBase(BaseModel):
     account_name: str = Field(..., min_length=1, max_length=255, description="Full account ledger title")
     account_type: AccountTypeEnum = Field(..., description="ICAI classification: asset | liability | equity | revenue | expense")
     account_subgroup: Optional[str] = Field(None, max_length=100, description="Subgroup: sundry_debtors, sundry_creditors, bank_accounts, duties_and_taxes, etc.")
+    role: Optional[str] = Field(None, max_length=50, description="Role: OUTPUT_CGST, OUTPUT_SGST, OUTPUT_IGST, INPUT_CGST, INPUT_SGST, INPUT_IGST, SALES, SALES_RETURN, PURCHASE, PURCHASE_RETURN, DEBTORS, CREDITORS, OTHER_INCOME")
     parent_account_id: Optional[uuid.UUID] = Field(None, description="Parent account ID for nested hierarchy")
     description: Optional[str] = Field(None, description="Optional ledger description or notes")
     is_active: bool = Field(True, description="Active status for transaction posting")
@@ -45,6 +46,7 @@ class AccountCreate(AccountBase):
 class AccountUpdate(BaseModel):
     account_name: Optional[str] = Field(None, min_length=1, max_length=255)
     account_subgroup: Optional[str] = Field(None, max_length=100)
+    role: Optional[str] = Field(None, max_length=50)
     parent_account_id: Optional[uuid.UUID] = None
     description: Optional[str] = None
     is_active: Optional[bool] = None

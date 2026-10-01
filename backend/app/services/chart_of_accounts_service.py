@@ -34,6 +34,87 @@ from app.core.exceptions import (
 
 logger = logging.getLogger(__name__)
 
+
+def determine_account_role(
+    code: Optional[str],
+    name: Optional[str],
+    account_type: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Derive the functional accounting/tax role for an account.
+    Resolves legacy vs new charts and resolves the 4020 collision:
+      - 4020 "Sales Return Account" -> "SALES_RETURN"
+      - 4020 "Inter-State Sales" -> "SALES"
+    """
+    c = (code or "").strip()
+    n = (name or "").strip().lower()
+
+    # 1. Output GST
+    if "output" in n and "cgst" in n:
+        return "OUTPUT_CGST"
+    if "output" in n and "sgst" in n:
+        return "OUTPUT_SGST"
+    if "output" in n and "igst" in n:
+        return "OUTPUT_IGST"
+    if "output" in n and "cess" in n:
+        return "OUTPUT_CESS"
+
+    # 2. Input GST (ITC)
+    if "input" in n and "cgst" in n:
+        return "INPUT_CGST"
+    if "input" in n and "sgst" in n:
+        return "INPUT_SGST"
+    if "input" in n and "igst" in n:
+        return "INPUT_IGST"
+    if "input" in n and "cess" in n:
+        return "INPUT_CESS"
+
+    # Code fallbacks for tax accounts
+    if c in ("2110", "2020") and "cgst" in n:
+        return "OUTPUT_CGST"
+    if c in ("2120", "2030") and "sgst" in n:
+        return "OUTPUT_SGST"
+    if c in ("2130", "2040") and "igst" in n:
+        return "OUTPUT_IGST"
+    if c in ("1210", "1060") and "cgst" in n:
+        return "INPUT_CGST"
+    if c in ("1220", "1070") and "sgst" in n:
+        return "INPUT_SGST"
+    if c in ("1230", "1080") and "igst" in n:
+        return "INPUT_IGST"
+
+    # 3. Sales Returns vs Sales (Handles 4020 collision by name+role)
+    if "sales return" in n or "sale return" in n or (c == "4030" and "return" in n):
+        return "SALES_RETURN"
+    if "purchase return" in n or c == "5020":
+        return "PURCHASE_RETURN"
+
+    if "inter-state sale" in n or "interstate sale" in n or "inter state sale" in n:
+        return "SALES"
+    if "sales" in n or "sale revenue" in n or c == "4010":
+        return "SALES"
+    if (c == "4020" and "inter" in n) or (c == "4020" and "return" not in n and "sale" in n):
+        return "SALES"
+    if c == "4020" and "return" in n:
+        return "SALES_RETURN"
+
+    # 4. Purchases
+    if "purchase" in n or c == "5010":
+        return "PURCHASE"
+
+    # 5. Debtors & Creditors
+    if ("debtor" in n or "receivable" in n or (c in ("1100", "1010") and "debtor" in n)) and "cash" not in n:
+        return "DEBTORS"
+    if ("creditor" in n or "trade payable" in n or c == "2010") and "tds" not in n:
+        return "CREDITORS"
+
+    # 6. Other Operating Income
+    if "other income" in n or "operating income" in n or c == "4030":
+        return "OTHER_INCOME"
+
+    return None
+
+
 # Standard Indian ICAI Chart of Accounts Template
 ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
     # ── 1. ASSETS (1000s) ───────────────────────────────────
@@ -44,6 +125,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "cash_and_bank",
         "description": "Physical cash vault and petty cash balance",
         "is_system": True,
+        "role": None,
     },
     {
         "account_code": "1020",
@@ -52,6 +134,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "cash_and_bank",
         "description": "Primary commercial operating bank account",
         "is_system": True,
+        "role": None,
     },
     {
         "account_code": "1100",
@@ -60,6 +143,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "sundry_debtors",
         "description": "Gross commercial receivables from customers",
         "is_system": True,
+        "role": "DEBTORS",
     },
     {
         "account_code": "1210",
@@ -68,6 +152,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Central GST Input Tax Credit claimable",
         "is_system": True,
+        "role": "INPUT_CGST",
     },
     {
         "account_code": "1220",
@@ -76,6 +161,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "State GST Input Tax Credit claimable",
         "is_system": True,
+        "role": "INPUT_SGST",
     },
     {
         "account_code": "1230",
@@ -84,6 +170,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Integrated GST Input Tax Credit claimable",
         "is_system": True,
+        "role": "INPUT_IGST",
     },
     {
         "account_code": "1240",
@@ -92,6 +179,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Compensation Cess Input Tax Credit claimable",
         "is_system": True,
+        "role": "INPUT_CESS",
     },
 
     # ── 2. LIABILITIES (2000s) ───────────────────────────────
@@ -102,6 +190,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "sundry_creditors",
         "description": "Gross commercial payables to vendors and suppliers",
         "is_system": True,
+        "role": "CREDITORS",
     },
     {
         "account_code": "2110",
@@ -110,6 +199,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Central GST statutory tax collected on sales",
         "is_system": True,
+        "role": "OUTPUT_CGST",
     },
     {
         "account_code": "2120",
@@ -118,6 +208,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "State GST statutory tax collected on sales",
         "is_system": True,
+        "role": "OUTPUT_SGST",
     },
     {
         "account_code": "2130",
@@ -126,6 +217,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Integrated GST statutory tax collected on sales",
         "is_system": True,
+        "role": "OUTPUT_IGST",
     },
     {
         "account_code": "2140",
@@ -134,6 +226,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Compensation Cess collected on sales",
         "is_system": True,
+        "role": "OUTPUT_CESS",
     },
     {
         "account_code": "2150",
@@ -142,6 +235,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "duties_and_taxes",
         "description": "Clearing account for statutory GST challan payments",
         "is_system": True,
+        "role": None,
     },
     {
         "account_code": "2200",
@@ -150,6 +244,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "statutory_liabilities",
         "description": "Tax Deducted at Source statutory liability",
         "is_system": True,
+        "role": None,
     },
 
     # ── 3. EQUITY (3000s) ────────────────────────────────────
@@ -160,6 +255,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "capital_account",
         "description": "Owner / Partner capital contributions",
         "is_system": True,
+        "role": None,
     },
     {
         "account_code": "3020",
@@ -168,6 +264,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "reserves_and_surplus",
         "description": "Cumulative retained earnings from previous financial years",
         "is_system": True,
+        "role": None,
     },
 
     # ── 4. REVENUE (4000s) ───────────────────────────────────
@@ -178,6 +275,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "operating_revenue",
         "description": "Taxable outward supply and sales consideration",
         "is_system": True,
+        "role": "SALES",
     },
     {
         "account_code": "4020",
@@ -186,6 +284,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "operating_revenue",
         "description": "Credit note sales returns contra revenue",
         "is_system": True,
+        "role": "SALES_RETURN",
     },
     {
         "account_code": "4030",
@@ -194,6 +293,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "other_income",
         "description": "Discounts received, commission, and miscellaneous operating income",
         "is_system": False,
+        "role": "OTHER_INCOME",
     },
 
     # ── 5. EXPENSES (5000s) ──────────────────────────────────
@@ -204,6 +304,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "cost_of_goods_sold",
         "description": "Cost of materials, goods, and direct trading purchases",
         "is_system": True,
+        "role": "PURCHASE",
     },
     {
         "account_code": "5020",
@@ -212,6 +313,7 @@ ICAI_DEFAULT_ACCOUNTS: List[Dict[str, Any]] = [
         "account_subgroup": "cost_of_goods_sold",
         "description": "Debit note purchase returns contra expense",
         "is_system": True,
+        "role": "PURCHASE_RETURN",
     },
     {
         "account_code": "5110",
@@ -303,6 +405,7 @@ class ChartOfAccountsService:
                 account_name=item["account_name"],
                 account_type=item["account_type"],
                 account_subgroup=item.get("account_subgroup"),
+                role=item.get("role") or determine_account_role(item["account_code"], item["account_name"], item["account_type"]),
                 description=item.get("description"),
                 is_active=True,
                 is_system=item.get("is_system", False),
@@ -454,6 +557,7 @@ class ChartOfAccountsService:
             account_name=data.account_name,
             account_type=data.account_type,
             account_subgroup=data.account_subgroup,
+            role=data.role or determine_account_role(data.account_code, data.account_name, data.account_type),
             parent_account_id=data.parent_account_id,
             description=data.description,
             is_active=data.is_active,
@@ -507,6 +611,9 @@ class ChartOfAccountsService:
 
         if data.account_subgroup is not None:
             acc.account_subgroup = data.account_subgroup
+
+        if data.role is not None:
+            acc.role = data.role
 
         if data.description is not None:
             acc.description = data.description

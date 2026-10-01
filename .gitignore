@@ -95,6 +95,7 @@ uploads/
 *.pt
 *.onnx
 models/
+!backend/app/models/
 *.npy
 
 # ──────────────────────────────────────────────
