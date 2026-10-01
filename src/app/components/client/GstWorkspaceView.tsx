@@ -84,6 +84,7 @@ export function GstWorkspaceView({
 
   // Live GST data states from backend
   const [gstr1Data, setGstr1Data] = useState<any>(null);
+  const [hsnData, setHsnData] = useState<any>(null);
   const [gstr2bData, setGstr2bData] = useState<any>(null);
   const [gstr3bData, setGstr3bData] = useState<any>(null);
   const [discrepancyData, setDiscrepancyData] = useState<any>(null);
@@ -108,8 +109,9 @@ export function GstWorkspaceView({
     const periodParam = selectedPeriod && selectedPeriod !== "all" ? `&period=${selectedPeriod}` : "";
 
     try {
-      const [r1, r2, r3, rDisc, rRecords] = await Promise.allSettled([
+      const [r1, rHsn, r2, r3, rDisc, rRecords] = await Promise.allSettled([
         fetch(`${base}/gst/reconciliation/gstr1?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+        fetch(`${base}/gst/reconciliation/table12-hsn?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/gstr2b?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/gstr3b?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/discrepancies?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
@@ -117,6 +119,7 @@ export function GstWorkspaceView({
       ]);
 
       if (r1.status === "fulfilled" && r1.value?.data) setGstr1Data(r1.value.data);
+      if (rHsn.status === "fulfilled" && rHsn.value?.data) setHsnData(rHsn.value.data);
       if (r2.status === "fulfilled" && r2.value?.data) setGstr2bData(r2.value.data);
       if (r3.status === "fulfilled" && r3.value?.data) setGstr3bData(r3.value.data);
       if (rDisc.status === "fulfilled" && rDisc.value?.data) setDiscrepancyData(rDisc.value.data);
@@ -147,62 +150,7 @@ export function GstWorkspaceView({
     [filingRecords]
   );
 
-  // ── Dynamic HSN Summary aggregated from real verified docs ──────
-  const dynamicHsnSummary = useMemo(() => {
-    const map = new Map<string, { code: string; desc: string; rate: number; taxable: number; tax: number; count: number }>();
 
-    uploadedDocs.forEach((doc) => {
-      const items = doc.line_items || doc.metadata?.line_items || [];
-      if (Array.isArray(items) && items.length > 0) {
-        items.forEach((item: any) => {
-          const code = String(item.hsn || item.hsn_code || doc.hsn || "").trim();
-          if (code && code !== "—" && code !== "-") {
-            const desc = item.item_name || item.particulars || item.description || "Goods/Services";
-            const taxable = Number(item.taxable_amount || item.amount || 0);
-            const rate = Number(item.gst_rate || item.rate || 18);
-            const tax =
-              Number(item.cgst_amount || 0) + Number(item.sgst_amount || 0) + Number(item.igst_amount || 0) ||
-              (taxable * rate) / 100;
-
-            const existing = map.get(code);
-            if (existing) {
-              existing.taxable += taxable;
-              existing.tax += tax;
-              existing.count += 1;
-            } else {
-              map.set(code, { code, desc, rate, taxable, tax, count: 1 });
-            }
-          }
-        });
-      }
-
-      if (doc.hsn && String(doc.hsn).trim() && !map.has(String(doc.hsn).trim())) {
-        const code = String(doc.hsn).trim();
-        const taxable = Number(doc.taxable_amount || doc.amount || 0);
-        const tax = Number(doc.cgst || 0) + Number(doc.sgst || 0) + Number(doc.igst || 0);
-        const rate = taxable > 0 ? Math.round((tax / taxable) * 100) : 18;
-        map.set(code, {
-          code,
-          desc: doc.vendor || doc.customer || "General Supplies",
-          rate: rate || 18,
-          taxable,
-          tax,
-          count: 1,
-        });
-      }
-    });
-
-    if (map.size > 0) return Array.from(map.values());
-
-    // Clean standard HSN list as baseline fallback
-    return [
-      { code: "8471", desc: "Automatic data processing machines (computers)", rate: 18, taxable: 0, tax: 0, count: 0 },
-      { code: "9983", desc: "Other professional, technical & business services", rate: 18, taxable: 0, tax: 0, count: 0 },
-      { code: "6109", desc: "T-shirts, singlets & vests, knitted", rate: 5, taxable: 0, tax: 0, count: 0 },
-      { code: "2106", desc: "Food preparations not elsewhere specified", rate: 12, taxable: 0, tax: 0, count: 0 },
-      { code: "3004", desc: "Medicaments (therapeutic use)", rate: 12, taxable: 0, tax: 0, count: 0 },
-    ];
-  }, [uploadedDocs]);
 
   // ── Handle Record Filing Submission ────────────────────────────
   const handleRecordFiling = async () => {
@@ -1334,21 +1282,21 @@ export function GstWorkspaceView({
           )}
 
           {/* ═════════════════════════════════════════════════════════ */}
-          {/* TAB 6: Dynamic HSN / SAC Summary                        */}
+          {/* TAB 6: Dynamic HSN / SAC Summary (Table 12)             */}
           {/* ═════════════════════════════════════════════════════════ */}
           {activeTab === "hsn" && (
             <div className="space-y-4 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="font-semibold text-foreground text-sm">
-                    HSN / SAC Rate-wise Product Breakdown
+                    GSTR-1 Table 12 HSN / SAC Rate-wise Product Breakdown
                   </h4>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Aggregated directly from line items across your verified sales and purchase invoices.
+                    Aggregated directly from posted outward supply ledger lines and line items.
                   </p>
                 </div>
                 <Badge variant="outline" className="text-xs font-mono">
-                  {dynamicHsnSummary.length} Classified Codes
+                  {(hsnData?.hsn_items?.length || 0)} Classified Codes
                 </Badge>
               </div>
 
@@ -1365,34 +1313,42 @@ export function GstWorkspaceView({
                     </tr>
                   </TableHeader>
                   <TableBody>
-                    {dynamicHsnSummary.map((h: any, idx: number) => (
-                      <TableRow key={idx} className="hover:bg-muted/20">
-                        <TableCell className="font-mono font-bold text-foreground">
-                          {h.code}
-                        </TableCell>
-                        <TableCell className="text-foreground font-medium">
-                          {h.desc}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-primary font-semibold">
-                          {h.rate}%
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {h.taxable > 0 ? formatGstCurrency(h.taxable) : "—"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-medium text-foreground">
-                          {h.tax > 0 ? formatGstCurrency(h.tax) : "—"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {h.count > 0 ? (
-                            <Badge variant="outline" className="text-[10px] font-mono border-primary/20 text-primary">
-                              {h.count} item{h.count > 1 ? "s" : ""}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground text-[11px]">—</span>
-                          )}
+                    {(hsnData?.hsn_items || []).length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                          No HSN/SAC data available for this period.
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      hsnData.hsn_items.map((h: any, idx: number) => (
+                        <TableRow key={idx} className="hover:bg-muted/20">
+                          <TableCell className="font-mono font-bold text-foreground">
+                            {h.hsn_sac}
+                          </TableCell>
+                          <TableCell className="text-foreground font-medium">
+                            {h.description || "Outward Supplies"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-primary font-semibold">
+                            {h.gst_rate !== null && h.gst_rate !== undefined ? `${h.gst_rate}%` : "—"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">
+                            {formatGstCurrency(Number(h.taxable_amount || 0))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-medium text-foreground">
+                            {formatGstCurrency(Number(h.total_tax || 0))}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {h.invoice_count > 0 ? (
+                              <Badge variant="outline" className="text-[10px] font-mono border-primary/20 text-primary">
+                                {h.invoice_count} voucher{h.invoice_count > 1 ? "s" : ""}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-[11px]">—</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>

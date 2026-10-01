@@ -22,6 +22,7 @@ from app.schemas.common import APIResponse
 from app.schemas.gst import GSTRecordResponse, GSTRecordCreate
 from app.schemas.gst_reconciliation import (
     Gstr1ReconciliationResponse,
+    Gstr1HsnSummaryResponse,
     Gstr2bReconciliationResponse,
     Gstr3bResponse,
     GstDiscrepancyReportResponse,
@@ -40,6 +41,7 @@ def get_gst_module_info():
         "status": "active",
         "features": [
             "gstr1_reconciliation",
+            "table12_hsn_summary",
             "gstr2b_itc_reconciliation",
             "gstr3b_summary",
             "discrepancy_detection",
@@ -75,6 +77,36 @@ def reconcile_gstr1(
     return APIResponse(
         success=True,
         message="GSTR-1 reconciliation generated successfully",
+        data=result,
+    )
+
+
+# ── 1b. GSTR-1 Table 12 HSN/SAC Summary ───────────────────────────────
+
+@router.get(
+    "/reconciliation/table12-hsn",
+    response_model=APIResponse[Gstr1HsnSummaryResponse],
+    summary="Get GSTR-1 Table 12 HSN/SAC Summary dynamically aggregated from posted outward ledgers",
+)
+def get_table12_hsn_summary(
+    client_id: uuid.UUID = Query(..., description="Target Client UUID"),
+    period: Optional[str] = Query(None, description="Filing Period (e.g. 2026-07)"),
+    from_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = GstReconciliationService.get_gstr1_table_12_hsn_summary(
+        db=db,
+        client_id=client_id,
+        user=current_user,
+        period=period,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return APIResponse(
+        success=True,
+        message="GSTR-1 Table 12 HSN/SAC summary generated successfully",
         data=result,
     )
 

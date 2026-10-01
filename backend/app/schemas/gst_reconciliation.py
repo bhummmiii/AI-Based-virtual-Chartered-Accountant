@@ -183,3 +183,29 @@ class GstFinancialInsightsResponse(BaseModel):
     summary_metrics: dict
     ca_observations: List[str] = []
     action_checklist: List[FilingChecklistItem] = []
+
+
+# ── Table 12 HSN/SAC Outward Supplies Summary (D8) ────────────────────
+class Gstr1HsnItem(BaseModel):
+    hsn_sac: str
+    description: str = ""
+    uqc: str = "OTH"  # Unit Quantity Code (NOS, KGS, LOT, OTH, etc.)
+    total_quantity: Decimal = Decimal("0.00")
+    total_value: Decimal = Decimal("0.00")
+    taxable_amount: Decimal = Decimal("0.00")
+    cgst: Decimal = Decimal("0.00")
+    sgst: Decimal = Decimal("0.00")
+    igst: Decimal = Decimal("0.00")
+    cess: Decimal = Decimal("0.00")
+    total_tax: Decimal = Decimal("0.00")
+    gst_rate: Optional[Decimal] = None
+    invoice_count: int = 1
+
+
+class Gstr1HsnSummaryResponse(BaseModel):
+    client_id: uuid.UUID
+    period: Optional[str] = None
+    total_records: int = 0
+    total_taxable_value: Decimal = Decimal("0.00")
+    total_tax_amount: Decimal = Decimal("0.00")
+    hsn_items: List[Gstr1HsnItem] = []

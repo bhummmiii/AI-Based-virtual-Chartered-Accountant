@@ -32,6 +32,8 @@ from app.schemas.gst_reconciliation import (
     GstDiscrepancyReportResponse,
     FilingChecklistItem,
     GstFinancialInsightsResponse,
+    Gstr1HsnItem,
+    Gstr1HsnSummaryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -1293,4 +1295,226 @@ class GstReconciliationService:
             summary_metrics=metrics,
             ca_observations=obs,
             action_checklist=checklist,
+        )
+
+    @classmethod
+    def get_gstr1_table_12_hsn_summary(
+        cls,
+        db: Session,
+        client_id: uuid.UUID,
+        user: User,
+        period: Optional[str] = None,
+        from_date: Optional[date] = None,
+        to_date: Optional[date] = None,
+    ) -> Gstr1HsnSummaryResponse:
+        """
+        Aggregate dynamic HSN/SAC Table 12 outward summary strictly from posted outward line items.
+        Returns empty list if no outward line items exist (never static mock data).
+        """
+        client = cls.verify_client_access(db, client_id, user)
+        client_gstin = (client.gst_number or "").strip().upper()
+        start_d, end_d = cls._parse_period_dates(period, from_date, to_date)
+
+        # 1. Fetch only posted, unreversed journal entries
+        posted_jes = db.query(JournalEntry).filter(
+            JournalEntry.client_id == client_id,
+            JournalEntry.status == "posted",
+            JournalEntry.is_reversed == False,
+        ).all()
+        posted_je_map: Dict[uuid.UUID, JournalEntry] = {
+            je.document_id: je for je in posted_jes if je.document_id
+        }
+
+        # 2. Fetch candidate outward documents
+        docs = db.query(UploadedDocument).filter(
+            UploadedDocument.client_id == client_id,
+            UploadedDocument.status != "rejected",
+        ).all()
+
+        hsn_map: Dict[str, Dict[str, Any]] = {}
+
+        for d in docs:
+            # Must have a posted ledger entry
+            if d.id not in posted_je_map:
+                continue
+
+            # Direction must be OUTWARD
+            direction = cls.determine_document_direction(d, client_gstin, db=db)
+            if direction != "OUTWARD":
+                continue
+
+            je = posted_je_map[d.id]
+            # Exclude purchase lines
+            has_purchase_lines = any(
+                ((l.account.role if l.account else None) or determine_account_role(l.account.account_code, l.account.account_name, l.account.account_type) if l.account else None) in ("PURCHASE", "PURCHASE_RETURN", "INPUT_CGST", "INPUT_SGST", "INPUT_IGST")
+                for l in je.lines
+            )
+            if has_purchase_lines:
+                continue
+
+            d_date = je.entry_date
+            if not d_date and d.invoice_date:
+                try:
+                    d_date = date.fromisoformat(d.invoice_date.strip()[:10])
+                except Exception:
+                    pass
+            if not d_date and d.created_at:
+                d_date = d.created_at.date()
+
+            if d_date:
+                if start_d and d_date < start_d:
+                    continue
+                if end_d and d_date > end_d:
+                    continue
+
+            # Sign for credit notes: In Table 12, sales credit notes reduce turnover/quantities
+            is_credit_note = d.document_category == "credit_note" or "credit" in (d.invoice_type or "").lower()
+            multiplier = Decimal("-1.00") if is_credit_note else Decimal("1.00")
+
+            # Check if document has line items in metadata
+            line_items: List[Dict[str, Any]] = []
+            if d.metadata_:
+                try:
+                    import json
+                    meta = json.loads(d.metadata_)
+                    if isinstance(meta, dict):
+                        line_items = meta.get("line_items") or meta.get("fields", {}).get("line_items") or []
+                        if not isinstance(line_items, list):
+                            line_items = []
+                except Exception:
+                    line_items = []
+
+            # Determine voucher taxes from ledger lines
+            v_taxable = Decimal("0.00")
+            v_cgst = Decimal("0.00")
+            v_sgst = Decimal("0.00")
+            v_igst = Decimal("0.00")
+            v_cess = Decimal("0.00")
+            for line in je.lines:
+                acc = line.account
+                role = (acc.role if acc else None) or (determine_account_role(acc.account_code, acc.account_name, acc.account_type) if acc else None)
+                dr = Decimal(str(line.debit_amount or 0.00))
+                cr = Decimal(str(line.credit_amount or 0.00))
+                net_cr = cr - dr
+                if role in ("SALES", "OTHER_INCOME", "SALES_RETURN"):
+                    v_taxable += net_cr
+                elif role == "OUTPUT_CGST":
+                    v_cgst += net_cr
+                elif role == "OUTPUT_SGST":
+                    v_sgst += net_cr
+                elif role == "OUTPUT_IGST":
+                    v_igst += net_cr
+                elif role == "OUTPUT_CESS":
+                    v_cess += net_cr
+
+            # If document has granular line items, aggregate each line item
+            if line_items:
+                for item in line_items:
+                    hsn_code = str(item.get("hsn") or item.get("hsn_code") or item.get("hsn_sac") or d.hsn or "OTH").strip()
+                    if not hsn_code or hsn_code in ("-", "—"):
+                        hsn_code = "OTH"
+                    desc = str(item.get("description") or item.get("item_name") or item.get("particulars") or d.customer or "Outward Supplies").strip()
+                    uqc = str(item.get("unit") or item.get("uom") or "OTH").strip().upper()
+                    qty = Decimal(str(item.get("quantity") or item.get("qty") or 0.00)) * multiplier
+                    item_taxable = Decimal(str(item.get("taxable_amount") or item.get("taxable_value") or item.get("amount") or 0.00)) * multiplier
+                    item_cgst = Decimal(str(item.get("cgst") or item.get("cgst_amount") or 0.00)) * multiplier
+                    item_sgst = Decimal(str(item.get("sgst") or item.get("sgst_amount") or 0.00)) * multiplier
+                    item_igst = Decimal(str(item.get("igst") or item.get("igst_amount") or 0.00)) * multiplier
+                    item_cess = Decimal(str(item.get("cess") or 0.00)) * multiplier
+                    item_tax = item_cgst + item_sgst + item_igst + item_cess
+                    item_total = item_taxable + item_tax
+
+                    if hsn_code not in hsn_map:
+                        hsn_map[hsn_code] = {
+                            "hsn_sac": hsn_code,
+                            "description": desc,
+                            "uqc": uqc,
+                            "total_quantity": Decimal("0.00"),
+                            "total_value": Decimal("0.00"),
+                            "taxable_amount": Decimal("0.00"),
+                            "cgst": Decimal("0.00"),
+                            "sgst": Decimal("0.00"),
+                            "igst": Decimal("0.00"),
+                            "cess": Decimal("0.00"),
+                            "total_tax": Decimal("0.00"),
+                            "invoice_count": 0,
+                        }
+                    e = hsn_map[hsn_code]
+                    e["total_quantity"] += qty
+                    e["total_value"] += item_total
+                    e["taxable_amount"] += item_taxable
+                    e["cgst"] += item_cgst
+                    e["sgst"] += item_sgst
+                    e["igst"] += item_igst
+                    e["cess"] += item_cess
+                    e["total_tax"] += item_tax
+                    e["invoice_count"] += 1
+            else:
+                # Document level fallback
+                hsn_code = str(d.hsn or "OTH").strip()
+                if not hsn_code or hsn_code in ("-", "—"):
+                    hsn_code = "OTH"
+                desc = str(d.customer or "Outward Supplies").strip()
+                v_tax = v_cgst + v_sgst + v_igst + v_cess
+                v_total = v_taxable + v_tax
+
+                if hsn_code not in hsn_map:
+                    hsn_map[hsn_code] = {
+                        "hsn_sac": hsn_code,
+                        "description": desc,
+                        "uqc": "OTH",
+                        "total_quantity": Decimal("0.00"),
+                        "total_value": Decimal("0.00"),
+                        "taxable_amount": Decimal("0.00"),
+                        "cgst": Decimal("0.00"),
+                        "sgst": Decimal("0.00"),
+                        "igst": Decimal("0.00"),
+                        "cess": Decimal("0.00"),
+                        "total_tax": Decimal("0.00"),
+                        "invoice_count": 0,
+                    }
+                e = hsn_map[hsn_code]
+                e["total_value"] += v_total
+                e["taxable_amount"] += v_taxable
+                e["cgst"] += v_cgst
+                e["sgst"] += v_sgst
+                e["igst"] += v_igst
+                e["cess"] += v_cess
+                e["total_tax"] += v_tax
+                e["invoice_count"] += 1
+
+        items: List[Gstr1HsnItem] = []
+        for code, data in sorted(hsn_map.items()):
+            taxable = data["taxable_amount"]
+            tax = data["total_tax"]
+            gst_rate = None
+            if taxable != Decimal("0.00"):
+                gst_rate = (abs(tax) / abs(taxable) * Decimal("100")).quantize(Decimal("0.01"))
+
+            items.append(Gstr1HsnItem(
+                hsn_sac=data["hsn_sac"],
+                description=data["description"] or "Outward Supplies",
+                uqc=data["uqc"],
+                total_quantity=data["total_quantity"].quantize(Decimal("0.01")),
+                total_value=data["total_value"].quantize(Decimal("0.01")),
+                taxable_amount=data["taxable_amount"].quantize(Decimal("0.01")),
+                cgst=data["cgst"].quantize(Decimal("0.01")),
+                sgst=data["sgst"].quantize(Decimal("0.01")),
+                igst=data["igst"].quantize(Decimal("0.01")),
+                cess=data["cess"].quantize(Decimal("0.01")),
+                total_tax=data["total_tax"].quantize(Decimal("0.01")),
+                gst_rate=gst_rate,
+                invoice_count=data["invoice_count"],
+            ))
+
+        tot_taxable = sum(it.taxable_amount for it in items)
+        tot_tax = sum(it.total_tax for it in items)
+
+        return Gstr1HsnSummaryResponse(
+            client_id=client_id,
+            period=period,
+            total_records=len(items),
+            total_taxable_value=tot_taxable,
+            total_tax_amount=tot_tax,
+            hsn_items=items,
         )
