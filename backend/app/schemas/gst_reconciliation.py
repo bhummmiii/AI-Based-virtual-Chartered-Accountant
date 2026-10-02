@@ -136,6 +136,11 @@ class Gstr3bResponse(BaseModel):
     itc_carried_forward_cgst: Decimal = Decimal("0.00")
     itc_carried_forward_sgst: Decimal = Decimal("0.00")
     itc_carried_forward_igst: Decimal = Decimal("0.00")
+    negative_liability_carried_forward: Decimal = Decimal("0.00")
+    negative_liability_cgst: Decimal = Decimal("0.00")
+    negative_liability_sgst: Decimal = Decimal("0.00")
+    negative_liability_igst: Decimal = Decimal("0.00")
+    settlement_summary: Optional[str] = None
     needs_ca_review: bool = False
     review_notes: List[str] = Field(default_factory=list)
 

@@ -64,7 +64,32 @@ class GstReconciliationService:
             return from_date, to_date
 
         if period:
-            # Handle YYYY-MM
+            p_clean = period.strip().upper()
+            # 1. Quarterly period (e.g. "2026-Q2", "Q2-2026", "Q2 FY 2026-27")
+            if "Q1" in p_clean or "Q2" in p_clean or "Q3" in p_clean or "Q4" in p_clean:
+                try:
+                    q_num = 1 if "Q1" in p_clean else 2 if "Q2" in p_clean else 3 if "Q3" in p_clean else 4
+                    import re
+                    year_match = re.search(r"\b(20\d\d)\b", p_clean)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        # Indian Financial Year quarters as displayed in statutory UI:
+                        # Q1: Apr 1 - Jun 30
+                        # Q2: Jul 1 - Sep 30
+                        # Q3: Oct 1 - Dec 31
+                        # Q4: Jan 1 - Mar 31 of next calendar year
+                        if q_num == 1:
+                            return date(year, 4, 1), date(year, 6, 30)
+                        elif q_num == 2:
+                            return date(year, 7, 1), date(year, 9, 30)
+                        elif q_num == 3:
+                            return date(year, 10, 1), date(year, 12, 31)
+                        elif q_num == 4:
+                            return date(year + 1, 1, 1), date(year + 1, 3, 31)
+                except Exception:
+                    pass
+
+            # 2. Monthly period (YYYY-MM)
             parts = period.split("-")
             if len(parts) == 2 and len(parts[0]) == 4 and len(parts[1]) == 2:
                 try:
@@ -865,9 +890,26 @@ class GstReconciliationService:
         needs_ca_review = False
         review_notes: List[str] = []
 
-        if raw_l_igst < Decimal("0.00") or raw_l_cgst < Decimal("0.00") or raw_l_sgst < Decimal("0.00"):
+        # Negative output liabilities (excess credit notes over supplies)
+        neg_cgst = abs(raw_l_cgst) if raw_l_cgst < Decimal("0.00") else Decimal("0.00")
+        neg_sgst = abs(raw_l_sgst) if raw_l_sgst < Decimal("0.00") else Decimal("0.00")
+        neg_igst = abs(raw_l_igst) if raw_l_igst < Decimal("0.00") else Decimal("0.00")
+        tot_neg_l = neg_cgst + neg_sgst + neg_igst
+
+        if tot_neg_l > Decimal("0.00"):
             needs_ca_review = True
-            review_notes.append("Net tax liability is negative in one or more heads due to credit notes exceeding supplies. Cash liability floored at 0.")
+            heads_neg = []
+            if neg_igst > Decimal("0.00"):
+                heads_neg.append(f"IGST -₹{neg_igst:,.2f}")
+            if neg_cgst > Decimal("0.00"):
+                heads_neg.append(f"CGST -₹{neg_cgst:,.2f}")
+            if neg_sgst > Decimal("0.00"):
+                heads_neg.append(f"SGST -₹{neg_sgst:,.2f}")
+            review_notes.append(
+                f"Net tax liability is negative in {', '.join(heads_neg)} due to credit notes exceeding supplies. "
+                f"Under GST statutory set-off rules (Sections 49, 49A, 49B), negative liability cannot offset other tax heads "
+                f"or reduce cash payable; it is carried forward as an adjustment for subsequent returns."
+            )
 
         rem_l_igst = max(Decimal("0.00"), raw_l_igst)
         rem_l_cgst = max(Decimal("0.00"), raw_l_cgst)
@@ -921,6 +963,19 @@ class GstReconciliationService:
         cf_sgst = rem_c_sgst
         tot_cf = cf_igst + cf_cgst + cf_sgst
 
+        # Structured statutory settlement summary
+        if tot_payable_cash > Decimal("0.00") and tot_neg_l > Decimal("0.00"):
+            settlement_summary = (
+                f"IGST ₹{cash_igst:,.2f} Cash Due · "
+                f"CGST/SGST −₹{tot_neg_l:,.2f} adjustment carried forward"
+            )
+        elif tot_payable_cash > Decimal("0.00"):
+            settlement_summary = f"Total Tax Payable in Cash: ₹{tot_payable_cash:,.2f}"
+        elif tot_cf > Decimal("0.00"):
+            settlement_summary = f"Total ITC Carried Forward: ₹{tot_cf:,.2f}"
+        else:
+            settlement_summary = "Nil Cash Liability"
+
         return Gstr3bResponse(
             client_id=client_id,
             period=period,
@@ -938,6 +993,11 @@ class GstReconciliationService:
             itc_carried_forward_cgst=cf_cgst,
             itc_carried_forward_sgst=cf_sgst,
             itc_carried_forward_igst=cf_igst,
+            negative_liability_carried_forward=tot_neg_l,
+            negative_liability_cgst=neg_cgst,
+            negative_liability_sgst=neg_sgst,
+            negative_liability_igst=neg_igst,
+            settlement_summary=settlement_summary,
             needs_ca_review=needs_ca_review,
             review_notes=review_notes,
         )
@@ -996,6 +1056,22 @@ class GstReconciliationService:
             if cat in ["e_way_bill", "gst_challan", "hsn_sac"]:
                 continue
 
+            # Period date filter (D3)
+            d_date = None
+            if d.invoice_date:
+                try:
+                    d_date = date.fromisoformat(d.invoice_date.strip()[:10])
+                except Exception:
+                    pass
+            if not d_date and d.created_at:
+                d_date = d.created_at.date()
+
+            if d_date:
+                if start_d and d_date < start_d:
+                    continue
+                if end_d and d_date > end_d:
+                    continue
+
             party_name = (d.customer or d.vendor or "").strip()
             tot_amt = Decimal(str(d.amount or 0.00))
             taxable = Decimal(str(d.taxable_amount or 0.00))
@@ -1050,8 +1126,12 @@ class GstReconciliationService:
                         recommended_action="Review OCR extraction lines or edit fields to fix tax calculation variance.",
                     ))
 
-            # Check 3: Unposted Invoices
-            if d.document_category in ["sales_records", "purchase_records", "b2b_invoice"] and d.status == "verified":
+            # Check 3: Unposted Invoices (Include all qualifying invoice & note categories)
+            unposted_eligible_categories = [
+                "sales_records", "purchase_records", "b2b_invoice",
+                "e_invoice", "b2c_invoice", "credit_note", "debit_note"
+            ]
+            if d.document_category in unposted_eligible_categories and d.status == "verified":
                 if d.id not in doc_posted_map:
                     discrepancies.append(GstDiscrepancyItem(
                         discrepancy_id=f"DISC-UNPOSTED-{d.id}",
@@ -1109,7 +1189,7 @@ class GstReconciliationService:
         # Check 5: Unlinked GL Tax Entries
         # Manual journal lines touching GST accounts without an uploaded document link
         gst_acc_codes = ["1060", "1070", "1080", "2020", "2030", "2040"]
-        unlinked_tax_jes = db.query(JournalEntry).join(
+        unlinked_tax_q = db.query(JournalEntry).join(
             JournalEntryLine, JournalEntryLine.journal_entry_id == JournalEntry.id
         ).join(
             ChartOfAccounts, ChartOfAccounts.id == JournalEntryLine.account_id
@@ -1118,7 +1198,12 @@ class GstReconciliationService:
             JournalEntry.status == "posted",
             JournalEntry.document_id.is_(None),
             ChartOfAccounts.account_code.in_(gst_acc_codes),
-        ).distinct().all()
+        )
+        if start_d:
+            unlinked_tax_q = unlinked_tax_q.filter(JournalEntry.entry_date >= start_d)
+        if end_d:
+            unlinked_tax_q = unlinked_tax_q.filter(JournalEntry.entry_date <= end_d)
+        unlinked_tax_jes = unlinked_tax_q.distinct().all()
 
         for je in unlinked_tax_jes:
             discrepancies.append(GstDiscrepancyItem(
@@ -1139,6 +1224,10 @@ class GstReconciliationService:
         # Find posted vouchers whose source document has tax, but whose lines lack GST accounts
         for je in posted_jes:
             if je.entry_type == "reversal" or je.status == "reversed":
+                continue
+            if start_d and je.entry_date and je.entry_date < start_d:
+                continue
+            if end_d and je.entry_date and je.entry_date > end_d:
                 continue
             doc = None
             if je.document_id:

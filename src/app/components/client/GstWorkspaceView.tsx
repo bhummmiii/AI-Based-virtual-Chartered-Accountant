@@ -166,7 +166,7 @@ export function GstWorkspaceView({
   const eligibleSgst = Number(gstr3bData?.table_4_net_itc?.sgst ?? gstr2bData?.eligible_itc_sgst ?? 0);
   const ineligibleItc = Number(gstr2bData?.ineligible_itc || 0);
 
-  const netCashPayable = Number(gstr3bData?.tax_payable_in_cash || Math.max(0, outwardTax - eligibleItc));
+  const netCashPayable = gstr3bData?.tax_payable_in_cash != null ? Number(gstr3bData.tax_payable_in_cash) : 0;
   const totalDiscrepancies = discrepancyData?.total_discrepancies ?? 0;
   const highRiskCount = discrepancyData?.high_count ?? 0;
   const isFilingBlocked = outwardTax < 0 || highRiskCount > 0;
@@ -441,8 +441,16 @@ export function GstWorkspaceView({
           </div>
           <div className="mt-2">
             <p className="text-xl font-bold font-mono text-amber-500">{formatGstCurrency(netCashPayable)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Net Tax = Outward ({formatGstCurrency(outwardTax)}) − ITC ({formatGstCurrency(eligibleItc)})
+            <p className="mt-1 text-xs text-muted-foreground truncate" title={
+              gstr3bData?.settlement_summary ||
+              (gstr3bData?.negative_liability_carried_forward && Number(gstr3bData.negative_liability_carried_forward) > 0
+                ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} Cash Due · CGST/SGST −${formatGstCurrency(gstr3bData.negative_liability_carried_forward)} adjustment carried forward`
+                : `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)
+            }>
+              {gstr3bData?.settlement_summary ||
+                (gstr3bData?.negative_liability_carried_forward && Number(gstr3bData.negative_liability_carried_forward) > 0
+                  ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} Cash Due · CGST/SGST −${formatGstCurrency(gstr3bData.negative_liability_carried_forward)} c/f`
+                  : `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)}
             </p>
           </div>
         </Card>
@@ -793,31 +801,42 @@ export function GstWorkspaceView({
               </div>
 
               {/* Table 6: Payment of Tax (Cash Computation) */}
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500 font-mono text-xs">
-                      Table 6 — Settlement
-                    </Badge>
-                    <h4 className="font-semibold text-foreground text-sm">
-                      Net Tax Payable in Cash (Electronic Cash Ledger)
-                    </h4>
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-500 font-mono text-xs">
+                        Table 6 — Settlement
+                      </Badge>
+                      <h4 className="font-semibold text-foreground text-sm">
+                        Net Tax Payable in Cash (Electronic Cash Ledger)
+                      </h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {gstr3bData?.settlement_summary ||
+                        `Statutory set-off under Sections 49, 49A, 49B (IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)}, CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)}, SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}).`}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Output Tax Liability ({formatGstCurrency(outwardTax)}) minus Net Eligible ITC ({formatGstCurrency(eligibleItc)}).
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="text-2xl font-bold font-mono text-amber-500">{formatGstCurrency(netCashPayable)}</p>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
-                      Cash Payment Required
-                    </span>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-2xl font-bold font-mono text-amber-500">{formatGstCurrency(netCashPayable)}</p>
+                      <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                        Cash Payment Required
+                      </span>
+                    </div>
+                    <Button size="sm" className="bg-amber-600 hover:bg-amber-500 text-white" onClick={openFilingModal}>
+                      Pay &amp; File GSTR-3B
+                    </Button>
                   </div>
-                  <Button size="sm" className="bg-amber-600 hover:bg-amber-500 text-white" onClick={openFilingModal}>
-                    Pay &amp; File GSTR-3B
-                  </Button>
                 </div>
+                {gstr3bData?.review_notes && gstr3bData.review_notes.length > 0 && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-md p-2.5 text-xs text-amber-700 dark:text-amber-300">
+                    <p className="font-semibold">Statutory Set-Off Note:</p>
+                    {gstr3bData.review_notes.map((note: string, idx: number) => (
+                      <p key={idx} className="mt-0.5 text-muted-foreground">{note}</p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
