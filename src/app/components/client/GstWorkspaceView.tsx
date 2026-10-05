@@ -22,6 +22,7 @@ import {
   Download,
   Info,
   Check,
+  Search,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Button } from "../ui/button";
@@ -61,6 +62,7 @@ interface GstWorkspaceViewProps {
   returnFrequency?: string; // Monthly | Quarterly
   uploadedDocs: any[];
   ledgerRecords: any[];
+  initialTab?: GstTab;
   onViewDoc: (docId: string) => void;
   onViewVoucher: (voucherId: string, docId?: string) => void;
 }
@@ -75,12 +77,88 @@ export function GstWorkspaceView({
   returnFrequency = "Quarterly",
   uploadedDocs,
   ledgerRecords,
+  initialTab,
   onViewDoc,
   onViewVoucher,
 }: GstWorkspaceViewProps) {
-  const [activeTab, setActiveTab] = useState<GstTab>("gstr3b");
+  const [activeTab, setActiveTab] = useState<GstTab>(initialTab || "gstr3b");
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<string>("2026-Q2");
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  // Extract master HSN/SAC catalog from uploaded documents
+  const masterHsnItems = useMemo(() => {
+    const items: Array<{
+      hsn_sac: string;
+      type: string;
+      description: string;
+      gst_rate: string | number;
+      cgst_rate: string | number;
+      sgst_rate: string | number;
+      igst_rate: string | number;
+      docId: string;
+      fileName: string;
+    }> = [];
+
+    (uploadedDocs || []).forEach((d) => {
+      if (d.document_category === "hsn_sac" || d.document_type === "hsn_sac") {
+        let metaObj: any = {};
+        if (typeof d.metadata_ === "string") {
+          try { metaObj = JSON.parse(d.metadata_); } catch (_) {}
+        } else if (typeof d.metadata === "object") {
+          metaObj = d.metadata || {};
+        }
+
+        const tableRows = metaObj?.table_data?.rows || metaObj?.line_items || [];
+        if (Array.isArray(tableRows) && tableRows.length > 0) {
+          tableRows.forEach((r: any) => {
+            const hsnVal = r.hsn_code || r.hsn || r.hsn_sac || r["HSN/SAC"] || r["HSN / SAC"] || "";
+            const descVal = r.item_name || r.description || r.item_description || r["Description"] || r["Item Description"] || "";
+            const typeVal = r.type || r["Type"] || (String(hsnVal).length >= 4 ? "HSN" : "SAC");
+            const gstVal = r.gst ?? r.gst_rate ?? r["GST %"] ?? "18";
+            const cgstVal = r.cgst ?? r.cgst_rate ?? r["CGST %"] ?? (Number(gstVal) / 2);
+            const sgstVal = r.sgst ?? r.sgst_rate ?? r["SGST %"] ?? (Number(gstVal) / 2);
+            const igstVal = r.igst ?? r.igst_rate ?? r["IGST %"] ?? gstVal;
+
+            if (hsnVal || descVal) {
+              items.push({
+                hsn_sac: String(hsnVal || "—"),
+                type: String(typeVal || "HSN"),
+                description: String(descVal || "—"),
+                gst_rate: gstVal,
+                cgst_rate: cgstVal,
+                sgst_rate: sgstVal,
+                igst_rate: igstVal,
+                docId: d.id,
+                fileName: d.file_name || "HSN_SAC_master.pdf",
+              });
+            }
+          });
+        }
+      }
+    });
+
+    return items;
+  }, [uploadedDocs]);
+
+  const [hsnSubView, setHsnSubView] = useState<"master" | "table12">("master");
+  const [hsnSearch, setHsnSearch] = useState<string>("");
+
+  const filteredMasterHsn = useMemo(() => {
+    if (!hsnSearch.trim()) return masterHsnItems;
+    const q = hsnSearch.toLowerCase().trim();
+    return masterHsnItems.filter(
+      (item) =>
+        item.hsn_sac.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.type.toLowerCase().includes(q)
+    );
+  }, [masterHsnItems, hsnSearch]);
 
   // Live GST data states from backend
   const [gstr1Data, setGstr1Data] = useState<any>(null);
@@ -1369,76 +1447,219 @@ export function GstWorkspaceView({
           )}
 
           {/* ═════════════════════════════════════════════════════════ */}
-          {/* TAB 6: Dynamic HSN / SAC Summary (Table 12)             */}
+          {/* TAB 6: Dynamic HSN / SAC Summary & Master Reference Data  */}
           {/* ═════════════════════════════════════════════════════════ */}
           {activeTab === "hsn" && (
             <div className="space-y-4 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-semibold text-foreground text-sm">
-                    GSTR-1 Table 12 HSN / SAC Rate-wise Product Breakdown
-                  </h4>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Aggregated directly from posted outward supply ledger lines and line items.
-                  </p>
+              {/* Sub-view switcher */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={hsnSubView === "master" ? "default" : "outline"}
+                    className="h-8 text-xs font-medium"
+                    onClick={() => setHsnSubView("master")}
+                  >
+                    <Layers className="size-3.5 mr-1.5" /> HSN / SAC Master Reference Data
+                    {masterHsnItems.length > 0 && (
+                      <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0 h-4">
+                        {masterHsnItems.length}
+                      </Badge>
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={hsnSubView === "table12" ? "default" : "outline"}
+                    className="h-8 text-xs font-medium"
+                    onClick={() => setHsnSubView("table12")}
+                  >
+                    <FileSpreadsheet className="size-3.5 mr-1.5" /> GSTR-1 Table 12 Outward Sales
+                    {(hsnData?.hsn_items?.length || 0) > 0 && (
+                      <Badge variant="secondary" className="ml-1.5 text-[10px] px-1.5 py-0 h-4">
+                        {hsnData.hsn_items.length}
+                      </Badge>
+                    )}
+                  </Button>
                 </div>
-                <Badge variant="outline" className="text-xs font-mono">
-                  {(hsnData?.hsn_items?.length || 0)} Classified Codes
-                </Badge>
+
+                {hsnSubView === "master" && (
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search HSN code or description…"
+                      value={hsnSearch}
+                      onChange={(e) => setHsnSearch(e.target.value)}
+                      className="h-8 pl-8 text-xs"
+                    />
+                  </div>
+                )}
               </div>
 
-              <div className="rounded-lg border border-border/70 overflow-x-auto">
-                <Table className="text-xs">
-                  <TableHeader>
-                    <tr className="bg-muted/40 text-muted-foreground">
-                      <TableHead className="w-24">HSN / SAC</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right w-24">GST Rate</TableHead>
-                      <TableHead className="text-right">Taxable Turnover</TableHead>
-                      <TableHead className="text-right">Tax Amount</TableHead>
-                      <TableHead className="text-center w-24">Entries</TableHead>
-                    </tr>
-                  </TableHeader>
-                  <TableBody>
-                    {(hsnData?.hsn_items || []).length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          No HSN/SAC data available for this period.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      hsnData.hsn_items.map((h: any, idx: number) => (
-                        <TableRow key={idx} className="hover:bg-muted/20">
-                          <TableCell className="font-mono font-bold text-foreground">
-                            {h.hsn_sac}
-                          </TableCell>
-                          <TableCell className="text-foreground font-medium">
-                            {h.description || "Outward Supplies"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-primary font-semibold">
-                            {h.gst_rate !== null && h.gst_rate !== undefined ? `${h.gst_rate}%` : "—"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {formatGstCurrency(Number(h.taxable_amount || 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-medium text-foreground">
-                            {formatGstCurrency(Number(h.total_tax || 0))}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {h.invoice_count > 0 ? (
-                              <Badge variant="outline" className="text-[10px] font-mono border-primary/20 text-primary">
-                                {h.invoice_count} voucher{h.invoice_count > 1 ? "s" : ""}
-                              </Badge>
-                            ) : (
-                              <span className="text-muted-foreground text-[11px]">—</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+              {hsnSubView === "master" ? (
+                /* Master Reference Data Catalog Table */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-foreground text-sm flex items-center gap-2">
+                        Uploaded HSN / SAC Tariff Master Catalog
+                        <Badge variant="outline" className="text-[11px] font-medium border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                          Verified Reference Source
+                        </Badge>
+                      </h4>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Extracted classification schedules used for product rate validation across sales and purchase entries.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-mono">
+                      {filteredMasterHsn.length} Tariff Record{filteredMasterHsn.length === 1 ? "" : "s"}
+                    </Badge>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 overflow-x-auto">
+                    <Table className="text-xs">
+                      <TableHeader>
+                        <tr className="bg-muted/40 text-muted-foreground">
+                          <TableHead className="w-24">HSN / SAC</TableHead>
+                          <TableHead className="w-20">Type</TableHead>
+                          <TableHead>Item Description</TableHead>
+                          <TableHead className="text-right w-20">GST %</TableHead>
+                          <TableHead className="text-right w-20">CGST %</TableHead>
+                          <TableHead className="text-right w-20">SGST %</TableHead>
+                          <TableHead className="text-right w-20">IGST %</TableHead>
+                          <TableHead className="text-center w-36">Source Document</TableHead>
+                        </tr>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredMasterHsn.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                              {masterHsnItems.length === 0
+                                ? "No HSN / SAC Master Reference documents uploaded yet. Upload an HSN/SAC document in the Invoices tab to view the tariff schedule here."
+                                : "No tariff items match the current search filter."}
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          filteredMasterHsn.map((h, idx) => (
+                            <TableRow key={idx} className="hover:bg-muted/20">
+                              <TableCell className="font-mono font-bold text-foreground">
+                                {h.hsn_sac}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
+                                    h.type?.toUpperCase() === "SAC"
+                                      ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/10"
+                                      : "border-blue-500/30 text-blue-600 bg-blue-500/10"
+                                  }`}
+                                >
+                                  {h.type}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-foreground font-medium">
+                                {h.description}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-primary font-bold">
+                                {h.gst_rate}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-muted-foreground">
+                                {h.cgst_rate}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-muted-foreground">
+                                {h.sgst_rate}%
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-muted-foreground">
+                                {h.igst_rate}%
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => onViewDoc(h.docId)}
+                                  className="h-6 px-2 text-[11px] text-primary hover:bg-primary/10 gap-1"
+                                >
+                                  <FileText className="size-3" />
+                                  <span className="truncate max-w-[100px]">{h.fileName}</span>
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : (
+                /* GSTR-1 Table 12 Outward Sales Summary Table */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-foreground text-sm">
+                        GSTR-1 Table 12 HSN / SAC Rate-wise Product Breakdown
+                      </h4>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Aggregated directly from posted outward supply ledger lines and line items.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-mono">
+                      {(hsnData?.hsn_items?.length || 0)} Classified Codes
+                    </Badge>
+                  </div>
+
+                  <div className="rounded-lg border border-border/70 overflow-x-auto">
+                    <Table className="text-xs">
+                      <TableHeader>
+                        <tr className="bg-muted/40 text-muted-foreground">
+                          <TableHead className="w-24">HSN / SAC</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead className="text-right w-24">GST Rate</TableHead>
+                          <TableHead className="text-right">Taxable Turnover</TableHead>
+                          <TableHead className="text-right">Tax Amount</TableHead>
+                          <TableHead className="text-center w-24">Entries</TableHead>
+                        </tr>
+                      </TableHeader>
+                      <TableBody>
+                        {(hsnData?.hsn_items || []).length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                              No outward HSN/SAC sales data available for this period.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          hsnData.hsn_items.map((h: any, idx: number) => (
+                            <TableRow key={idx} className="hover:bg-muted/20">
+                              <TableCell className="font-mono font-bold text-foreground">
+                                {h.hsn_sac}
+                              </TableCell>
+                              <TableCell className="text-foreground font-medium">
+                                {h.description || "Outward Supplies"}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-primary font-semibold">
+                                {h.gst_rate !== null && h.gst_rate !== undefined ? `${h.gst_rate}%` : "—"}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {formatGstCurrency(Number(h.taxable_amount || 0))}
+                              </TableCell>
+                              <TableCell className="text-right font-mono font-medium text-foreground">
+                                {formatGstCurrency(Number(h.total_tax || 0))}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {h.invoice_count > 0 ? (
+                                  <Badge variant="outline" className="text-[10px] font-mono border-primary/20 text-primary">
+                                    {h.invoice_count} voucher{h.invoice_count > 1 ? "s" : ""}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-[11px]">—</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

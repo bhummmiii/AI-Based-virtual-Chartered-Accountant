@@ -125,6 +125,7 @@ export function ClientWorkspace() {
   const [previewDoc, setPreviewDoc] = useState<{ id: string; fileName: string; fileType: string | null } | null>(null);
   // ── Document detail (View) state ───────────────────────────
   const [viewDocId, setViewDocId] = useState<string | null>(null);
+  const [gstSubTab, setGstSubTab] = useState<string | undefined>(undefined);
 
   // Get the UUID db_id — must come after client guard so we compute it lazily
   const clientDbId = client ? (dbIdMap.get(client.id) ?? "") : "";
@@ -672,6 +673,7 @@ export function ClientWorkspace() {
             clientGstin={client?.gstin ?? ""}
             uploadedDocs={uploadedDocs}
             ledgerRecords={ledgerRecords}
+            initialTab={gstSubTab as any}
             onViewDoc={(docId) => setViewDocId(docId)}
             onViewVoucher={(voucherId, docId) => {
               const v = displayTransactions.find(
@@ -957,7 +959,10 @@ export function ClientWorkspace() {
           fetchDocs();
           fetchLedger();
         }}
-        onNavigateTab={(targetTab) => setTab(targetTab)}
+        onNavigateTab={(targetTab, subTab) => {
+          setTab(targetTab);
+          if (subTab) setGstSubTab(subTab);
+        }}
         onViewVoucher={(voucherId) => {
           setTab("accounting");
           const v = displayTransactions.find((t) => t.id === voucherId || t.documentId === viewDocId);

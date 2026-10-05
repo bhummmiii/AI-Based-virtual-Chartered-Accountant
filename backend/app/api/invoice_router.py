@@ -196,6 +196,7 @@ async def upload_document(
     extraction_method: Optional[str] = Form(default=None),
     # Force save even if a duplicate is detected
     force_save: Optional[str] = Form(default="false"),
+    applies_to: Optional[str] = Form(default=None),
     file: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -392,6 +393,43 @@ async def upload_document(
         if not financial_year or not str(financial_year).strip():
             raise BadRequestException(detail=f"Financial year is required for '{document_category}'")
 
+    # ── Resolve applies_to direction ──
+    resolved_applies_to = (applies_to or "").strip().lower()
+    if not resolved_applies_to:
+        if document_category == "debit_note":
+            resolved_applies_to = "purchase"
+        elif document_category == "credit_note":
+            resolved_applies_to = "sales"
+
+    # ── Auto-extract tables for HSN/SAC master or PDF if not yet extracted ──
+    if (file_ext == "pdf" or (content and content.startswith(b"%PDF"))) and (
+        document_category == "hsn_sac" or not _has_table_data(metadata_json)
+    ):
+        try:
+            from app.api.routers.ocr.router import _extract_tables_and_metadata_from_pdf
+            pdf_meta, pdf_tables = _extract_tables_and_metadata_from_pdf(content)
+            if pdf_tables and len(pdf_tables[0].get("rows", [])) > 0:
+                t0 = pdf_tables[0]
+                t_rows = t0.get("rows", [])
+                t_headers = t0.get("headers", [])
+                t_headers_raw = t0.get("headers_raw", [])
+                parsed_meta = {}
+                if metadata_json:
+                    try:
+                        parsed_meta = _json.loads(metadata_json)
+                    except Exception:
+                        parsed_meta = {}
+                parsed_meta["table_data"] = {
+                    "headers": t_headers,
+                    "headers_raw": t_headers_raw,
+                    "rows": t_rows,
+                }
+                parsed_meta["line_items"] = t_rows
+                parsed_meta["line_item_headers"] = t_headers_raw
+                metadata_json = _json.dumps(parsed_meta)
+        except Exception as e:
+            logger.warning("PDF table auto-extraction on upload failed: %s", e)
+
     # ── Persist ──
     doc = UploadedDocument(
         client_id=client_id,
@@ -410,6 +448,7 @@ async def upload_document(
         igst=_dec(igst, "IGST"),
         cess=_dec(cess, "Cess"),
         hsn=hsn,
+        applies_to=resolved_applies_to if resolved_applies_to else None,
         gst_return_type=gst_return_type,
         financial_year=financial_year,
         month=month,
@@ -840,7 +879,31 @@ def extract_document_line_items(
     with open(path, "rb") as f:
         content = f.read()
 
-    fields, line_items = _gemini_vision_extract(content, doc.document_category)
+    fields = {}
+    line_items = []
+
+    # 1. Native PDF table extraction if document is PDF
+    if (doc.file_type or "").lower() == "pdf" or content.startswith(b"%PDF"):
+        try:
+            from app.api.routers.ocr.router import _extract_tables_and_metadata_from_pdf
+            pdf_meta, pdf_tables = _extract_tables_and_metadata_from_pdf(content)
+            if pdf_tables and len(pdf_tables[0].get("rows", [])) > 0:
+                fields.update(pdf_meta)
+                t0 = pdf_tables[0]
+                t_rows = t0.get("rows", [])
+                if doc.document_category == "hsn_sac" or len(t_rows) > 0:
+                    line_items = t_rows
+        except Exception as e:
+            logger.warning("Native PDF table extraction fallback to vision: %s", e)
+
+    # 2. Vision extract fallback or addition
+    if not line_items:
+        v_fields, v_items = _gemini_vision_extract(content, doc.document_category)
+        if not fields:
+            fields = v_fields
+        else:
+            fields.update(v_fields)
+        line_items = v_items
 
     # Merge into existing metadata
     existing_meta = {}
@@ -854,9 +917,21 @@ def extract_document_line_items(
         existing_meta["line_items"] = line_items
         col_labels = {
             "sr_no": "Sr. No.",
-            "item_name": "Item Description",
-            "company_name": "Company / Brand",
+            "hsn_code": "HSN / SAC",
             "hsn": "HSN / SAC",
+            "hsn_sac": "HSN / SAC",
+            "type": "Type",
+            "item_name": "Item Description",
+            "description": "Item Description",
+            "company_name": "Company / Brand",
+            "gst": "GST %",
+            "gst_rate": "GST %",
+            "cgst": "CGST %",
+            "cgst_rate": "CGST %",
+            "sgst": "SGST %",
+            "sgst_rate": "SGST %",
+            "igst": "IGST %",
+            "igst_rate": "IGST %",
             "batch_no": "Batch No.",
             "expiry_date": "Expiry Date",
             "quantity": "Quantity",
@@ -869,18 +944,44 @@ def extract_document_line_items(
             "total_amount": "Total Amount",
         }
         preferred_order = [
-            "sr_no", "item_name", "company_name", "hsn", "batch_no", "expiry_date",
-            "quantity", "rate", "discount", "taxable_amount", "cgst_amount", "sgst_amount", "igst_amount", "total_amount"
+            "sr_no", "hsn_code", "hsn", "type", "item_name", "description",
+            "gst", "gst_rate", "cgst", "cgst_rate", "sgst", "sgst_rate", "igst", "igst_rate",
+            "company_name", "batch_no", "expiry_date", "quantity", "rate", "discount",
+            "taxable_amount", "cgst_amount", "sgst_amount", "igst_amount", "total_amount"
         ]
-        active_cols = [c for c in preferred_order if any(c in row for row in line_items)]
-        for row in line_items:
+
+        normalized_items = []
+        for r in line_items:
+            norm_r = dict(r)
+            if "hsn_code" in norm_r and "hsn" not in norm_r:
+                norm_r["hsn"] = norm_r["hsn_code"]
+            if "hsn" in norm_r and "hsn_code" not in norm_r:
+                norm_r["hsn_code"] = norm_r["hsn"]
+            if "item_name" in norm_r and "description" not in norm_r:
+                norm_r["description"] = norm_r["item_name"]
+            if "description" in norm_r and "item_name" not in norm_r:
+                norm_r["item_name"] = norm_r["description"]
+            if "gst" in norm_r and "gst_rate" not in norm_r:
+                norm_r["gst_rate"] = norm_r["gst"]
+            if "gst_rate" in norm_r and "gst" not in norm_r:
+                norm_r["gst"] = norm_r["gst_rate"]
+            if "cgst" in norm_r and "cgst_rate" not in norm_r:
+                norm_r["cgst_rate"] = norm_r["cgst"]
+            if "sgst" in norm_r and "sgst_rate" not in norm_r:
+                norm_r["sgst_rate"] = norm_r["sgst"]
+            if "igst" in norm_r and "igst_rate" not in norm_r:
+                norm_r["igst_rate"] = norm_r["igst"]
+            normalized_items.append(norm_r)
+
+        active_cols = [c for c in preferred_order if any(c in row for row in normalized_items)]
+        for row in normalized_items:
             for k in row.keys():
                 if k not in active_cols:
                     active_cols.append(k)
         raw_headers = [col_labels.get(c, c.replace("_", " ").title()) for c in active_cols]
 
         enriched_rows = []
-        for row in line_items:
+        for row in normalized_items:
             er = dict(row)
             for c, rh in zip(active_cols, raw_headers):
                 if c in row and rh not in er:

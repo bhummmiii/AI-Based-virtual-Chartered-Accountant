@@ -77,7 +77,23 @@ export function UploadDocumentModal({ open, onOpenChange, category, clientId, on
       const fd = new FormData();
       fd.append("document_category", category.id);
       fd.append("document_type", "upload");
-      Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
+
+      if (category.id === "debit_note") {
+        fd.append("applies_to", (form.applies_to as string) || "purchase");
+      } else if (category.id === "credit_note") {
+        fd.append("applies_to", (form.applies_to as string) || "sales");
+      }
+
+      const extraMeta: Record<string, any> = {};
+      if (form.original_invoice_number) extraMeta.original_invoice_number = form.original_invoice_number;
+      if (form.reason) extraMeta.reason = form.reason;
+      if (Object.keys(extraMeta).length > 0) {
+        fd.append("metadata_json", JSON.stringify({ fields: extraMeta }));
+      }
+
+      Object.entries(form).forEach(([k, v]) => {
+        if (v && k !== "original_invoice_number" && k !== "reason") fd.append(k, v);
+      });
       fd.append("file", file);
 
       // Use raw fetch with auth token since api.post serialises to JSON
@@ -289,9 +305,9 @@ function DynamicFields({ category, form, set, gstinErr, setGstinErr }: {
     case "purchase_records":
       return <>{f("Vendor", "vendor", "Supplier name")} {gstinField} {f("Invoice Number", "invoice_number", "BILL-001")} {f("Purchase Date", "invoice_date", "", "date")} {f("HSN Code", "hsn", "8471")} {amountFields}</>;
     case "credit_note":
-      return <>{f("Original Invoice Number", "invoice_number", "INV-2024-001")} {f("Credit Note Number", "notice_number", "CN-001")} {f("Date", "invoice_date", "", "date")} {f("Reason", "vendor", "Reason for return")} {f("Customer", "customer", "Customer name")} {f("Amount (₹)", "amount", "0.00", "number")} {gstinField}</>;
+      return <>{f("Credit Note Number", "invoice_number", "CN-001")} {f("Original Invoice Number", "original_invoice_number", "INV-2024-001")} {f("Date", "invoice_date", "", "date")} {f("Customer / Buyer", "customer", "Customer name")} {f("Supplier / Issuer", "vendor", "Supplier name")} {f("Reason for Return", "reason", "Defective goods")} {f("Amount (₹)", "amount", "0.00", "number")} {gstinField}</>;
     case "debit_note":
-      return <>{f("Original Invoice Number", "invoice_number", "INV-2024-001")} {f("Debit Note Number", "notice_number", "DN-001")} {f("Date", "invoice_date", "", "date")} {f("Reason", "vendor", "Reason for return")} {f("Amount (₹)", "amount", "0.00", "number")} {gstinField}</>;
+      return <>{f("Debit Note Number", "invoice_number", "ABC/PDN/26-27/001")} {f("Original Invoice Number", "original_invoice_number", "INV-2024-001")} {f("Date", "invoice_date", "", "date")} {f("Supplier / Creditor", "vendor", "Supplier name")} {f("Customer / Recipient", "customer", "Customer name")} {f("Reason for Return", "reason", "Purchase return")} {f("Amount (₹)", "amount", "0.00", "number")} {gstinField}</>;
     case "gst_return":
       return (
         <>

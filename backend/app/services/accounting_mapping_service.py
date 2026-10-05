@@ -77,6 +77,7 @@ class AccountingMappingService:
         from app.models.client import Client
         client = db.query(Client).filter(Client.id == doc.client_id).first()
         client_gstin = (client.gst_number or "").strip().upper() if client else ""
+        client_name = (client.company_name or "").strip() if client else ""
 
         cat = (doc.document_category or "").lower()
         gross_amount = Decimal(str(doc.amount)).quantize(Decimal("0.01"))
@@ -163,7 +164,17 @@ class AccountingMappingService:
             # (1) Look up referenced original invoice ("Against Invoice X dt Y" or metadata fields)
             ocr_content = getattr(doc, "ocr_text", "") or ""
             extr_content = getattr(doc, "extracted_text", "") or ""
-            raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''}"
+            if not ocr_content and doc.file_path:
+                try:
+                    import pypdf
+                    from pathlib import Path
+                    fp = Path(doc.file_path)
+                    if fp.exists():
+                        reader = pypdf.PdfReader(str(fp))
+                        ocr_content = "".join([p.extract_text() or "" for p in reader.pages])
+                except Exception:
+                    pass
+            raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''} {doc.file_name or ''}"
 
             ref_inv_no = meta_orig_inv_no
             if not ref_inv_no:
@@ -184,6 +195,18 @@ class AccountingMappingService:
                         note_side = "SALES"
                     elif orig_cat in {"purchase_records"} or "purchase" in orig_inv_type:
                         note_side = "PURCHASE"
+                else:
+                    # Also check AccountingRecord by reference
+                    from app.models.accounting_record import AccountingRecord
+                    orig_rec = db.query(AccountingRecord).filter(
+                        AccountingRecord.client_id == doc.client_id,
+                        func.upper(AccountingRecord.reference_number) == ref_inv_no.upper(),
+                    ).first()
+                    if orig_rec:
+                        if orig_rec.voucher_type in ("sales", "income", "receipt"):
+                            note_side = "SALES"
+                        elif orig_rec.voucher_type in ("purchase", "expense", "payment"):
+                            note_side = "PURCHASE"
 
             # (2) Hint from applies_to, anchor or party
             if not note_side:
@@ -191,6 +214,13 @@ class AccountingMappingService:
                     applies = str(doc.applies_to).strip().upper()
                     if applies in ("SALES", "PURCHASE"):
                         note_side = applies
+                # Check for explicit purchase return or sales return markers in text or filename
+                if not note_side:
+                    lower_raw = raw_text_content.lower()
+                    if "purchase return" in lower_raw or "purchase debit note" in lower_raw or (doc.file_name and doc.file_name.upper().startswith("PDN")):
+                        note_side = "PURCHASE"
+                    elif "sales return" in lower_raw or "sales credit note" in lower_raw or (doc.file_name and doc.file_name.upper().startswith("SCN")):
+                        note_side = "SALES"
                 if not note_side and meta_supplier_gstin and client_gstin and meta_supplier_gstin == client_gstin:
                     note_side = "SALES"
                 elif not note_side and meta_customer_gstin and client_gstin and meta_customer_gstin == client_gstin:
@@ -611,6 +641,13 @@ class AccountingMappingService:
             entry_type = "journal"
             if is_inward:
                 vendor_name = doc.vendor or "Vendor"
+                party_gst = doc.gstin
+                if client_name and doc.vendor and (client_name.lower() in doc.vendor.lower() or doc.vendor.lower() in client_name.lower()) and doc.customer:
+                    vendor_name = doc.customer
+                    party_gst = meta_customer_gstin or None
+                elif client_gstin and (meta_supplier_gstin == client_gstin or (doc.gstin and doc.gstin == client_gstin)) and doc.customer:
+                    vendor_name = doc.customer
+                    party_gst = meta_customer_gstin or None
                 creditor_acc = get_acc("CREDITORS", "2010", "1010")
                 purchase_return_acc = get_acc("PURCHASE_RETURN", "5020", "5010")
                 cgst_acc = get_acc("INPUT_CGST", "1210")
@@ -629,7 +666,7 @@ class AccountingMappingService:
                     credit_amount=Decimal("0.00"),
                     description=f"Debit Note debit to {vendor_name}",
                     party_name=vendor_name,
-                    party_gstin=doc.gstin,
+                    party_gstin=party_gst,
                 ))
 
                 diff = gross_amount - (taxable_amount + tot_tax)

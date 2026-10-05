@@ -383,16 +383,16 @@ class AccountingDraftService:
             if duplicate_ref:
                 val_result = AccountingValidationResult(
                     eligible=False,
-                    status="duplicate_invoice",
+                    status="already_posted",
                     reason=(
-                        f"Duplicate commercial transaction detected: An accounting record with reference '{ref_no}' "
-                        f"has already been posted to the ledger for this client (Record ID: {duplicate_ref.id})."
+                        f"Commercial transaction with reference '{ref_no}' has already been posted to the ledger "
+                        f"for this client (Record ID: {duplicate_ref.id})."
                     ),
                     document_id=doc.id,
                     document_category=doc.document_category,
                 )
                 return DraftGenerateResponse(
-                    status="error",
+                    status="already_posted",
                     message=val_result.reason,
                     record=AccountingRecordResponse.model_validate(duplicate_ref),
                     validation=val_result,
@@ -447,7 +447,25 @@ class AccountingDraftService:
         if client_id:
             query = query.filter(AccountingRecord.client_id == client_id)
         if document_id:
-            query = query.filter(AccountingRecord.document_id == document_id)
+            records = query.filter(AccountingRecord.document_id == document_id)
+            if status and status.lower() not in {"all", "*", ""}:
+                records = records.filter(AccountingRecord.status == status)
+            found = records.order_by(AccountingRecord.transaction_date.desc()).all()
+            if found:
+                return found
+            # Fallback: check if an accounting record already exists for the same commercial reference
+            doc = db.query(UploadedDocument).filter(UploadedDocument.id == document_id).first()
+            if doc and doc.invoice_number:
+                companion_query = db.query(AccountingRecord).filter(
+                    AccountingRecord.client_id == doc.client_id,
+                    AccountingRecord.reference_number == doc.invoice_number,
+                )
+                if status and status.lower() not in {"all", "*", ""}:
+                    companion_query = companion_query.filter(AccountingRecord.status == status)
+                companion_records = companion_query.order_by(AccountingRecord.transaction_date.desc()).all()
+                if companion_records:
+                    return companion_records
+            return []
         if status and status.lower() not in {"all", "*", ""}:
             query = query.filter(AccountingRecord.status == status)
         return query.order_by(AccountingRecord.transaction_date.desc()).all()

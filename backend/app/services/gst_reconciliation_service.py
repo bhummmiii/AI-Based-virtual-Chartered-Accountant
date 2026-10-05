@@ -187,10 +187,21 @@ class GstReconciliationService:
         # 3. For Credit / Debit Notes: Resolve via original invoice reference or applies_to
         if cat in {"credit_note", "debit_note"}:
             ref_inv = meta_orig_inv_no
+            ocr_content = getattr(doc, "ocr_text", "") or ""
+            extr_content = getattr(doc, "extracted_text", "") or ""
+            if not ocr_content and doc.file_path:
+                try:
+                    import pypdf
+                    from pathlib import Path
+                    fp = Path(doc.file_path)
+                    if fp.exists():
+                        reader = pypdf.PdfReader(str(fp))
+                        ocr_content = "".join([p.extract_text() or "" for p in reader.pages])
+                except Exception:
+                    pass
+            raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''} {doc.file_name or ''}"
+
             if not ref_inv:
-                ocr_content = getattr(doc, "ocr_text", "") or ""
-                extr_content = getattr(doc, "extracted_text", "") or ""
-                raw_text_content = f"{ocr_content} {extr_content} {doc.metadata_ or ''}"
                 import re
                 m_ref = re.search(r"(?:Against|Ref(?:erence)?|Original)\s+(?:Invoice|Inv)?\.?\s*[:\-]?\s*([A-Za-z0-9\/\-_]+)", raw_text_content, re.IGNORECASE)
                 ref_inv = m_ref.group(1).strip() if m_ref else ""
@@ -208,6 +219,17 @@ class GstReconciliationService:
                         return "OUTWARD"
                     elif orig_cat in {"purchase_records"} or "purchase" in orig_inv_t:
                         return "INWARD"
+                else:
+                    from app.models.accounting_record import AccountingRecord
+                    orig_rec = db.query(AccountingRecord).filter(
+                        AccountingRecord.client_id == doc.client_id,
+                        func.upper(AccountingRecord.reference_number) == ref_inv.upper(),
+                    ).first()
+                    if orig_rec:
+                        if orig_rec.voucher_type in ("sales", "income", "receipt"):
+                            return "OUTWARD"
+                        elif orig_rec.voucher_type in ("purchase", "expense", "payment"):
+                            return "INWARD"
 
             # Check CA applies_to override
             if getattr(doc, "applies_to", None):
@@ -216,6 +238,13 @@ class GstReconciliationService:
                     return "OUTWARD"
                 elif applies in ("PURCHASE", "INWARD"):
                     return "INWARD"
+
+            # Check for explicit purchase return or sales return markers in text or filename
+            lower_raw = raw_text_content.lower()
+            if "purchase return" in lower_raw or "purchase debit note" in lower_raw or (doc.file_name and doc.file_name.upper().startswith("PDN")):
+                return "INWARD"
+            elif "sales return" in lower_raw or "sales credit note" in lower_raw or (doc.file_name and doc.file_name.upper().startswith("SCN")):
+                return "OUTWARD"
 
             # Check client anchor
             if client_gstin:

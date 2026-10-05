@@ -45,7 +45,7 @@ interface Props {
   onOpenChange: (o: boolean) => void;
   docId: string;
   onUpdate?: () => void;
-  onNavigateTab?: (tab: string) => void;
+  onNavigateTab?: (tab: string, subTab?: string) => void;
   onViewVoucher?: (voucherId?: string) => void;
   allDocs?: any[];
 }
@@ -723,9 +723,21 @@ export interface TableModel {
 
 const CANONICAL_COL_LABELS: Record<string, string> = {
   sr_no: "Sr. No.",
-  item_name: "Item Description",
-  company_name: "Company / Brand",
+  hsn_code: "HSN / SAC",
   hsn: "HSN / SAC",
+  hsn_sac: "HSN / SAC",
+  type: "Type",
+  item_name: "Item Description",
+  description: "Item Description",
+  company_name: "Company / Brand",
+  gst: "GST %",
+  gst_rate: "GST %",
+  cgst: "CGST %",
+  cgst_rate: "CGST %",
+  sgst: "SGST %",
+  sgst_rate: "SGST %",
+  igst: "IGST %",
+  igst_rate: "IGST %",
   batch_no: "Batch No.",
   expiry_date: "Expiry Date",
   quantity: "Quantity",
@@ -759,17 +771,22 @@ function getTableCellValue(row: Record<string, unknown>, colKey: string, colLabe
   const synonymGroups: Record<string, string[]> = {
     sr_no: ["sr_no", "sr", "s_no", "serial_no", "srno", "sno", "sr_num"],
     item_name: ["item_name", "item", "description", "particulars", "product", "product_name", "item_description", "particular", "desc"],
+    type: ["type", "item_type", "hsn_type"],
     company_name: ["company_name", "company", "brand", "manufacturer", "make", "mfr"],
     hsn: ["hsn", "hsn_sac", "hsn_code", "sac", "hsncode"],
+    gst: ["gst", "gst_rate", "gst_percent", "tax_rate", "gst%"],
+    cgst: ["cgst", "cgst_rate", "cgst_percent", "cgst%"],
+    sgst: ["sgst", "sgst_rate", "sgst_percent", "sgst%"],
+    igst: ["igst", "igst_rate", "igst_percent", "igst%"],
     batch_no: ["batch_no", "batch", "batchnumber", "lot_no", "lot"],
     expiry_date: ["expiry_date", "expiry", "exp_date", "expdate", "exp"],
     quantity: ["quantity", "qty", "nos", "units", "qnty"],
     rate: ["rate", "price", "unit_price", "rate_per_no", "unitrate", "mrp"],
     discount: ["discount", "disc", "disc_percent", "disc_amt", "discount_amount"],
     taxable_amount: ["taxable_amount", "taxable_value", "ass_amt", "assessable_value", "taxable", "assamt"],
-    cgst_amount: ["cgst_amount", "cgst", "cgst_amt", "cgstamt"],
-    sgst_amount: ["sgst_amount", "sgst", "sgst_amt", "sgstamt"],
-    igst_amount: ["igst_amount", "igst", "igst_amt", "igstamt"],
+    cgst_amount: ["cgst_amount", "cgst_amt", "cgstamt"],
+    sgst_amount: ["sgst_amount", "sgst_amt", "sgstamt"],
+    igst_amount: ["igst_amount", "igst_amt", "igstamt"],
     total_amount: ["total_amount", "total", "amount", "net_amount", "total_value", "item_total"],
   };
 
@@ -1075,13 +1092,13 @@ const CATEGORY_FIELD_SCHEMA: Record<string, FieldDef[]> = {
 
   /* —— Credit / Debit Note —— */
   credit_note: [
-    { label: "Credit Note No.",      key: "credit_note_number" },
+    { label: "Credit Note No.",      key: "invoice_number" },
     { label: "Credit Note Number",   key: "notice_number" },
-    { label: "Credit Note Date",     key: "credit_note_date" },
+    { label: "Credit Note Date",     key: "invoice_date" },
     { label: "Document Date",        key: "invoice_date" },
     { label: "Posting Date",         key: "posting_date" },
 
-    { label: "Original Invoice No.", key: "invoice_number" },
+    { label: "Original Invoice No.", key: "original_invoice_number" },
     { label: "Original Invoice Date", key: "original_invoice_date" },
     { label: "Document Type",        key: "invoice_type" },
 
@@ -1104,13 +1121,13 @@ const CATEGORY_FIELD_SCHEMA: Record<string, FieldDef[]> = {
   ],
 
   debit_note: [
-    { label: "Debit Note No.",       key: "debit_note_number" },
+    { label: "Debit Note No.",       key: "invoice_number" },
     { label: "Debit Note Number",    key: "notice_number" },
-    { label: "Debit Note Date",      key: "debit_note_date" },
+    { label: "Debit Note Date",      key: "invoice_date" },
     { label: "Document Date",        key: "invoice_date" },
     { label: "Posting Date",         key: "posting_date" },
 
-    { label: "Original Invoice No.", key: "invoice_number" },
+    { label: "Original Invoice No.", key: "original_invoice_number" },
     { label: "Original Invoice Date", key: "original_invoice_date" },
     { label: "Document Type",        key: "invoice_type" },
 
@@ -1901,9 +1918,15 @@ export function DocumentDetailModal({
           await fetchDraft();
         }
 
-        toast.success("Document Verified & Draft Created", {
-          description: "Accounting draft generated and ready for review in the ledger.",
-        });
+        if (draftBody?.data?.status === "already_posted") {
+          toast.success("Document Verified & Linked to Ledger", {
+            description: "A commercial transaction for this invoice is already posted to the ledger.",
+          });
+        } else {
+          toast.success("Document Verified & Draft Created", {
+            description: "Accounting draft generated and ready for review in the ledger.",
+          });
+        }
       } else {
         toast.success("Document Verified", {
           description: "Informational document marked as verified.",
@@ -1973,16 +1996,22 @@ export function DocumentDetailModal({
         await fetchDraft();
       }
 
-      const draftTypeLabel =
-        routing.accountingDraft === "adjustment"
-          ? "Adjustment Draft"
-          : routing.accountingDraft === "payment"
-          ? "Payment Draft"
-          : "Accounting Draft";
+      if (draftBody?.data?.status === "already_posted") {
+        toast.info("Transaction Already Posted", {
+          description: "An accounting record for this reference has already been posted to the ledger.",
+        });
+      } else {
+        const draftTypeLabel =
+          routing.accountingDraft === "adjustment"
+            ? "Adjustment Draft"
+            : routing.accountingDraft === "payment"
+            ? "Payment Draft"
+            : "Accounting Draft";
 
-      toast.success(`${draftTypeLabel} Created`, {
-        description: `${draftTypeLabel} ready for review in the ledger.`,
-      });
+        toast.success(`${draftTypeLabel} Created`, {
+          description: `${draftTypeLabel} ready for review in the ledger.`,
+        });
+      }
       onUpdate?.();
     } catch (e: any) {
       toast.error("Failed to generate draft", {
@@ -2011,7 +2040,7 @@ export function DocumentDetailModal({
 
   const handleManageReferenceData = () => {
     onOpenChange(false);
-    onNavigateTab?.("gsttax");
+    onNavigateTab?.("gsttax", "hsn");
     toast.success("Navigated to HSN / SAC Reference Data");
   };
 
@@ -2189,8 +2218,10 @@ export function DocumentDetailModal({
       });
     } else {
       const preferred = [
-        "sr_no", "item_name", "company_name", "hsn", "batch_no", "expiry_date",
-        "quantity", "rate", "discount", "taxable_amount", "cgst_amount", "sgst_amount", "igst_amount", "total_amount"
+        "sr_no", "hsn_code", "hsn", "type", "item_name", "description",
+        "gst", "gst_rate", "cgst", "cgst_rate", "sgst", "sgst_rate", "igst", "igst_rate",
+        "company_name", "batch_no", "expiry_date", "quantity", "rate", "discount",
+        "taxable_amount", "cgst_amount", "sgst_amount", "igst_amount", "total_amount"
       ];
       preferred.forEach((k) => {
         if (rawRows.some(r => !isEmpty(r[k]))) {
