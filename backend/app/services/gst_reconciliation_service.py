@@ -653,6 +653,8 @@ class GstReconciliationService:
 
         inward_categories = [
             "purchase_records",
+            "purchase_invoice",
+            "bills",
             "debit_note",
             "credit_note",
             "b2b_invoice",
