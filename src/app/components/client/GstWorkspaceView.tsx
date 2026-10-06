@@ -552,15 +552,13 @@ export function GstWorkspaceView({
           <div className="mt-2">
             <p className="text-xl font-bold font-mono text-amber-500">{formatGstCurrency(netCashPayable)}</p>
             <p className="mt-1 text-xs text-muted-foreground truncate" title={
-              gstr3bData?.settlement_summary ||
-              (gstr3bData?.negative_liability_carried_forward && Number(gstr3bData.negative_liability_carried_forward) > 0
-                ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} Cash Due · CGST/SGST −${formatGstCurrency(gstr3bData.negative_liability_carried_forward)} adjustment carried forward`
-                : `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)
+              Number(gstr3bData?.itc_reversal_payable_total || 0) > 0
+                ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} (incl. ITC reversal ${formatGstCurrency(gstr3bData?.itc_reversal_payable_total || 0)})`
+                : (gstr3bData?.settlement_summary || `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)
             }>
-              {gstr3bData?.settlement_summary ||
-                (gstr3bData?.negative_liability_carried_forward && Number(gstr3bData.negative_liability_carried_forward) > 0
-                  ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} Cash Due · CGST/SGST −${formatGstCurrency(gstr3bData.negative_liability_carried_forward)} c/f`
-                  : `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)}
+              {Number(gstr3bData?.itc_reversal_payable_total || 0) > 0
+                ? `IGST ${formatGstCurrency(gstr3bData?.cash_payable_igst || 0)} (incl. ITC reversal ${formatGstCurrency(gstr3bData?.itc_reversal_payable_total || 0)})`
+                : (gstr3bData?.settlement_summary || `IGST: ${formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)} · CGST: ${formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)} · SGST: ${formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}`)}
             </p>
           </div>
         </Card>
@@ -807,41 +805,61 @@ export function GstWorkspaceView({
                         (A) ITC Available (whether in full or part) - All other ITC from registered suppliers
                       </TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleIgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_itc_available?.igst ?? eligibleIgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleCgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_itc_available?.cgst ?? eligibleCgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleSgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_itc_available?.sgst ?? eligibleSgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-muted-foreground">₹0.00</TableCell>
                       <TableCell className="text-right font-mono font-bold text-foreground">
-                        {formatGstCurrency(eligibleItc)}
+                        {formatGstCurrency(
+                          Number(gstr3bData?.table_4_itc_available?.igst || 0) +
+                          Number(gstr3bData?.table_4_itc_available?.cgst || 0) +
+                          Number(gstr3bData?.table_4_itc_available?.sgst || 0) || eligibleItc
+                        )}
                       </TableCell>
                     </TableRow>
                     <TableRow className="hover:bg-muted/20 text-muted-foreground">
-                      <TableCell>(B) ITC Reversed - As per rules 38, 42 &amp; 43 of CGST Rules</TableCell>
+                      <TableCell>(B) ITC Reversed - (2) Others (Credit notes &amp; purchase returns)</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatGstCurrency(gstr3bData?.table_4_itc_reversed?.igst ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatGstCurrency(gstr3bData?.table_4_itc_reversed?.cgst ?? 0)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {formatGstCurrency(gstr3bData?.table_4_itc_reversed?.sgst ?? 0)}
+                      </TableCell>
                       <TableCell className="text-right font-mono">₹0.00</TableCell>
-                      <TableCell className="text-right font-mono">₹0.00</TableCell>
-                      <TableCell className="text-right font-mono">₹0.00</TableCell>
-                      <TableCell className="text-right font-mono">₹0.00</TableCell>
-                      <TableCell className="text-right font-mono">₹0.00</TableCell>
+                      <TableCell className="text-right font-mono font-medium">
+                        {formatGstCurrency(
+                          Number(gstr3bData?.table_4_itc_reversed?.igst || 0) +
+                          Number(gstr3bData?.table_4_itc_reversed?.cgst || 0) +
+                          Number(gstr3bData?.table_4_itc_reversed?.sgst || 0)
+                        )}
+                      </TableCell>
                     </TableRow>
                     <TableRow className="bg-muted/20 font-semibold border-t border-border/70">
                       <TableCell className="text-foreground">(C) Net ITC Available (A) − (B)</TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleIgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_net_itc?.igst ?? eligibleIgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleCgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_net_itc?.cgst ?? eligibleCgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-blue-600 dark:text-blue-400">
-                        {formatGstCurrency(eligibleSgst)}
+                        {formatGstCurrency(gstr3bData?.table_4_net_itc?.sgst ?? eligibleSgst)}
                       </TableCell>
                       <TableCell className="text-right font-mono">₹0.00</TableCell>
                       <TableCell className="text-right font-mono text-blue-500 font-bold">
-                        {formatGstCurrency(eligibleItc)}
+                        {formatGstCurrency(
+                          Number(gstr3bData?.table_4_net_itc?.igst || 0) +
+                          Number(gstr3bData?.table_4_net_itc?.cgst || 0) +
+                          Number(gstr3bData?.table_4_net_itc?.sgst || 0) || eligibleItc
+                        )}
                       </TableCell>
                     </TableRow>
                     {ineligibleItc > 0 && (
@@ -939,6 +957,36 @@ export function GstWorkspaceView({
                     </Button>
                   </div>
                 </div>
+
+                {/* Statutory Head-wise Breakdown (E1) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-amber-500/20 text-xs">
+                  <div className="rounded border border-amber-500/20 bg-background/50 p-2 space-y-1 font-mono">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Cash Payable Breakdown</span>
+                    <div className="flex justify-between"><span>IGST:</span><strong className="text-amber-500">{formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)}</strong></div>
+                    <div className="flex justify-between"><span>CGST:</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)}</strong></div>
+                    <div className="flex justify-between"><span>SGST:</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}</strong></div>
+                  </div>
+                  <div className="rounded border border-amber-500/20 bg-background/50 p-2 space-y-1 font-mono">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">ITC Reversal Payable</span>
+                    <div className="flex justify-between"><span>IGST:</span><span className={Number(gstr3bData?.itc_reversal_payable_igst || 0) > 0 ? "text-amber-600 dark:text-amber-400 font-bold" : ""}>{formatGstCurrency(gstr3bData?.itc_reversal_payable_igst ?? 0)}</span></div>
+                    <div className="flex justify-between"><span>CGST:</span><span>{formatGstCurrency(gstr3bData?.itc_reversal_payable_cgst ?? 0)}</span></div>
+                    <div className="flex justify-between"><span>SGST:</span><span>{formatGstCurrency(gstr3bData?.itc_reversal_payable_sgst ?? 0)}</span></div>
+                  </div>
+                  <div className="rounded border border-amber-500/20 bg-background/50 p-2 space-y-1 font-mono">
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Carry-Forward ITC</span>
+                    <div className="flex justify-between"><span>IGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_igst ?? 0)}</span></div>
+                    <div className="flex justify-between"><span>CGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_cgst ?? 0)}</span></div>
+                    <div className="flex justify-between"><span>SGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_sgst ?? 0)}</span></div>
+                  </div>
+                </div>
+
+                {gstr3bData?.has_negative_itc_head && (
+                  <div className="bg-amber-500/15 border border-amber-500/30 rounded-md p-2.5 text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                    <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+                    <span><strong>Negative ITC head detected:</strong> CA to confirm treatment (pay with 3B or via DRC-03).</span>
+                  </div>
+                )}
+
                 {gstr3bData?.review_notes && gstr3bData.review_notes.length > 0 && (
                   <div className="bg-amber-500/10 border border-amber-500/20 rounded-md p-2.5 text-xs text-amber-700 dark:text-amber-300">
                     <p className="font-semibold">Statutory Set-Off Note:</p>

@@ -13,6 +13,8 @@
 *.pem
 *.key
 service-account*.json
+backups/
+*.sql
 
 # ──────────────────────────────────────────────
 # Dependencies

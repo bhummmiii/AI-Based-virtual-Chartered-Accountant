@@ -140,6 +140,11 @@ class Gstr3bResponse(BaseModel):
     negative_liability_cgst: Decimal = Decimal("0.00")
     negative_liability_sgst: Decimal = Decimal("0.00")
     negative_liability_igst: Decimal = Decimal("0.00")
+    itc_reversal_payable_cgst: Decimal = Decimal("0.00")
+    itc_reversal_payable_sgst: Decimal = Decimal("0.00")
+    itc_reversal_payable_igst: Decimal = Decimal("0.00")
+    itc_reversal_payable_total: Decimal = Decimal("0.00")
+    has_negative_itc_head: bool = False
     settlement_summary: Optional[str] = None
     needs_ca_review: bool = False
     review_notes: List[str] = Field(default_factory=list)

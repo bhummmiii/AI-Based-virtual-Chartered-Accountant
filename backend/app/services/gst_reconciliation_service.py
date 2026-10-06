@@ -893,24 +893,101 @@ class GstReconciliationService:
             cess=Decimal("0.00"),
         )
 
-        # Table 4 ITC
-        itc_available = Gstr3bSectionSummary(
-            taxable_value=gstr2b.total_inward_taxable,
-            igst=gstr2b.eligible_itc_igst,
-            cgst=gstr2b.eligible_itc_cgst,
-            sgst=gstr2b.eligible_itc_sgst,
-            cess=Decimal("0.00"),
-        )
-        itc_reversed = Gstr3bSectionSummary(
-            taxable_value=Decimal("0.00"),
-            igst=Decimal("0.00"),
-            cgst=Decimal("0.00"),
-            sgst=Decimal("0.00"),
-            cess=Decimal("0.00"),
-        )
-        net_itc = itc_available  # net = available - reversed
+        # Table 4 ITC: Decompose into (A) ITC Available (purchases only) and (B) ITC Reversed - others (purchase returns / reductions as positive amounts)
+        avail_taxable = Decimal("0.00")
+        avail_cgst = Decimal("0.00")
+        avail_sgst = Decimal("0.00")
+        avail_igst = Decimal("0.00")
+        avail_cess = Decimal("0.00")
 
-        # Statutory Set-off Engine (C10: Sections 49, 49A, 49B)
+        rev_taxable = Decimal("0.00")
+        rev_cgst = Decimal("0.00")
+        rev_sgst = Decimal("0.00")
+        rev_igst = Decimal("0.00")
+        rev_cess = Decimal("0.00")
+
+        if gstr2b.invoices:
+            for inv in gstr2b.invoices:
+                is_reduction = (
+                    inv.document_category in ("debit_note", "purchase_records")
+                    and (
+                        inv.taxable_amount < Decimal("0.00")
+                        or inv.total_tax < Decimal("0.00")
+                        or inv.igst < Decimal("0.00")
+                        or inv.cgst < Decimal("0.00")
+                        or inv.sgst < Decimal("0.00")
+                    )
+                ) or (
+                    inv.document_category == "debit_note"
+                )
+                if is_reduction:
+                    rev_taxable += abs(inv.taxable_amount)
+                    if inv.cgst < Decimal("0.00"):
+                        rev_cgst += abs(inv.cgst)
+                    if inv.sgst < Decimal("0.00"):
+                        rev_sgst += abs(inv.sgst)
+                    if inv.igst < Decimal("0.00"):
+                        rev_igst += abs(inv.igst)
+                    if inv.cess < Decimal("0.00"):
+                        rev_cess += abs(inv.cess)
+                else:
+                    avail_taxable += inv.taxable_amount
+                    avail_cgst += inv.cgst
+                    avail_sgst += inv.sgst
+                    avail_igst += inv.igst
+                    avail_cess += inv.cess
+
+            itc_available = Gstr3bSectionSummary(
+                taxable_value=avail_taxable,
+                igst=avail_igst,
+                cgst=avail_cgst,
+                sgst=avail_sgst,
+                cess=avail_cess,
+            )
+            itc_reversed = Gstr3bSectionSummary(
+                taxable_value=rev_taxable,
+                igst=rev_igst,
+                cgst=rev_cgst,
+                sgst=rev_sgst,
+                cess=rev_cess,
+            )
+            net_itc = Gstr3bSectionSummary(
+                taxable_value=avail_taxable - rev_taxable,
+                igst=avail_igst - rev_igst,
+                cgst=avail_cgst - rev_cgst,
+                sgst=avail_sgst - rev_sgst,
+                cess=avail_cess - rev_cess,
+            )
+        else:
+            avail_cgst = max(Decimal("0.00"), gstr2b.eligible_itc_cgst)
+            avail_sgst = max(Decimal("0.00"), gstr2b.eligible_itc_sgst)
+            avail_igst = max(Decimal("0.00"), gstr2b.eligible_itc_igst)
+            rev_cgst = max(Decimal("0.00"), -gstr2b.eligible_itc_cgst)
+            rev_sgst = max(Decimal("0.00"), -gstr2b.eligible_itc_sgst)
+            rev_igst = max(Decimal("0.00"), -gstr2b.eligible_itc_igst)
+            itc_available = Gstr3bSectionSummary(
+                taxable_value=max(Decimal("0.00"), gstr2b.total_inward_taxable),
+                igst=avail_igst,
+                cgst=avail_cgst,
+                sgst=avail_sgst,
+                cess=Decimal("0.00"),
+            )
+            itc_reversed = Gstr3bSectionSummary(
+                taxable_value=max(Decimal("0.00"), -gstr2b.total_inward_taxable),
+                igst=rev_igst,
+                cgst=rev_cgst,
+                sgst=rev_sgst,
+                cess=Decimal("0.00"),
+            )
+            net_itc = Gstr3bSectionSummary(
+                taxable_value=gstr2b.total_inward_taxable,
+                igst=gstr2b.eligible_itc_igst,
+                cgst=gstr2b.eligible_itc_cgst,
+                sgst=gstr2b.eligible_itc_sgst,
+                cess=Decimal("0.00"),
+            )
+
+        # Statutory Set-off Engine (C10 / E1: Sections 49, 49A, 49B)
         # 1. Net output liabilities (can be negative if credit notes exceed supplies)
         raw_l_igst = outward_sec.igst
         raw_l_cgst = outward_sec.cgst
@@ -940,9 +1017,24 @@ class GstReconciliationService:
                 f"or reduce cash payable; it is carried forward as an adjustment for subsequent returns."
             )
 
-        rem_l_igst = max(Decimal("0.00"), raw_l_igst)
-        rem_l_cgst = max(Decimal("0.00"), raw_l_cgst)
-        rem_l_sgst = max(Decimal("0.00"), raw_l_sgst)
+        # E1 Rule: Per head h:
+        # liability[h] = net outward tax[h] (existing handling for negative outward stays) + max(-net_itc[h], 0) ("ITC reversal payable")
+        # credit[h] = max(net_itc[h], 0)
+        itc_rev_igst = max(-net_itc.igst, Decimal("0.00"))
+        itc_rev_cgst = max(-net_itc.cgst, Decimal("0.00"))
+        itc_rev_sgst = max(-net_itc.sgst, Decimal("0.00"))
+        tot_itc_rev = itc_rev_igst + itc_rev_cgst + itc_rev_sgst
+
+        rem_l_igst = max(Decimal("0.00"), raw_l_igst) + itc_rev_igst
+        rem_l_cgst = max(Decimal("0.00"), raw_l_cgst) + itc_rev_cgst
+        rem_l_sgst = max(Decimal("0.00"), raw_l_sgst) + itc_rev_sgst
+
+        has_negative_itc_head = tot_itc_rev > Decimal("0.00")
+        if has_negative_itc_head:
+            needs_ca_review = True
+            review_notes.append(
+                "Negative ITC head - CA to confirm treatment (pay with 3B or via DRC-03)"
+            )
 
         # 2. Available ITC Credits
         rem_c_igst = max(Decimal("0.00"), net_itc.igst)
@@ -998,6 +1090,17 @@ class GstReconciliationService:
                 f"IGST ₹{cash_igst:,.2f} Cash Due · "
                 f"CGST/SGST −₹{tot_neg_l:,.2f} adjustment carried forward"
             )
+        elif tot_payable_cash > Decimal("0.00") and tot_itc_rev > Decimal("0.00"):
+            rev_details = []
+            if itc_rev_igst > Decimal("0.00"):
+                rev_details.append(f"IGST {cash_igst:,.2f} (incl. ITC reversal {itc_rev_igst:,.2f})")
+            elif cash_igst > Decimal("0.00"):
+                rev_details.append(f"IGST {cash_igst:,.2f}")
+            if cash_cgst > Decimal("0.00"):
+                rev_details.append(f"CGST {cash_cgst:,.2f}")
+            if cash_sgst > Decimal("0.00"):
+                rev_details.append(f"SGST {cash_sgst:,.2f}")
+            settlement_summary = f"{', '.join(rev_details)}"
         elif tot_payable_cash > Decimal("0.00"):
             settlement_summary = f"Total Tax Payable in Cash: ₹{tot_payable_cash:,.2f}"
         elif tot_cf > Decimal("0.00"):
@@ -1026,6 +1129,11 @@ class GstReconciliationService:
             negative_liability_cgst=neg_cgst,
             negative_liability_sgst=neg_sgst,
             negative_liability_igst=neg_igst,
+            itc_reversal_payable_cgst=itc_rev_cgst,
+            itc_reversal_payable_sgst=itc_rev_sgst,
+            itc_reversal_payable_igst=itc_rev_igst,
+            itc_reversal_payable_total=tot_itc_rev,
+            has_negative_itc_head=has_negative_itc_head,
             settlement_summary=settlement_summary,
             needs_ca_review=needs_ca_review,
             review_notes=review_notes,
