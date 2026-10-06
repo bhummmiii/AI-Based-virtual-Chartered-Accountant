@@ -325,15 +325,10 @@ export function GstWorkspaceView({
   const openFilingModal = () => {
     const targetPeriod = selectedPeriod && selectedPeriod !== "all" ? selectedPeriod : "2026-09";
     setFilingPeriod(targetPeriod);
-    const form = filingForm || "GSTR-3B";
-    if (form === "GSTR-1") {
-      setFilingTaxable(outwardTaxable.toFixed(2));
-      setFilingTax(outwardTax.toFixed(2));
-    } else {
-      setFilingTaxable(outwardTaxable.toFixed(2));
-      setFilingTax(netCashPayable.toFixed(2));
-    }
-    setFilingDueDate(computeStatutoryDueDate(targetPeriod, form, returnFrequency));
+    setFilingForm("GSTR-3B");
+    setFilingTaxable(outwardTaxable.toFixed(2));
+    setFilingTax(netCashPayable.toFixed(2));
+    setFilingDueDate(computeStatutoryDueDate(targetPeriod, "GSTR-3B", returnFrequency));
     setRecordModalOpen(true);
   };
 
@@ -368,15 +363,26 @@ export function GstWorkspaceView({
       const taxableNum = parseFloat(filingTaxable) || (gstr3bData?.table_3_1_outward?.taxable_value ? parseFloat(gstr3bData.table_3_1_outward.taxable_value) : 0);
       const taxNum = parseFloat(filingTax) || (gstr3bData?.tax_payable_in_cash ? parseFloat(gstr3bData.tax_payable_in_cash) : 0);
 
+      const is3b = filingForm === "GSTR-3B";
+      const cgstVal = is3b
+        ? Number(gstr3bData?.cash_payable_cgst ?? 0)
+        : taxNum / 2;
+      const sgstVal = is3b
+        ? Number(gstr3bData?.cash_payable_sgst ?? 0)
+        : taxNum / 2;
+      const igstVal = is3b
+        ? Number(gstr3bData?.cash_payable_igst ?? 0)
+        : 0;
+
       const payload = {
         client_id: clientId,
         gst_period: filingPeriod,
         gst_type: filingForm,
         taxable_amount: taxableNum,
-        cgst: taxNum / 2,
-        sgst: taxNum / 2,
-        igst: 0,
-        total_tax: taxNum,
+        cgst: cgstVal,
+        sgst: sgstVal,
+        igst: igstVal,
+        total_tax: is3b ? Number(gstr3bData?.tax_payable_in_cash ?? taxNum) : taxNum,
         filing_status: "filed",
         due_date: filingDueDate,
       };
@@ -1881,6 +1887,14 @@ export function GstWorkspaceView({
                 <p className="text-[10px] text-muted-foreground">Derived statutory liability</p>
               </div>
             </div>
+
+            {filingForm === "GSTR-3B" && (
+              <div className="rounded border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[11px] grid grid-cols-3 gap-2">
+                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash IGST</span><strong className="text-amber-500">{formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)}</strong></div>
+                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash CGST</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)}</strong></div>
+                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash SGST</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}</strong></div>
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label className="text-xs">Statutory Due Date</Label>
