@@ -2040,6 +2040,7 @@ export function DocumentDetailModal({
 
   const handleManageReferenceData = () => {
     onOpenChange(false);
+    onUpdate?.();
     onNavigateTab?.("gsttax", "hsn");
     toast.success("Navigated to HSN / SAC Reference Data");
   };

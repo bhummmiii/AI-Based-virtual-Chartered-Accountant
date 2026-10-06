@@ -75,7 +75,7 @@ export function GstWorkspaceView({
   clientName,
   clientGstin,
   returnFrequency = "Quarterly",
-  uploadedDocs,
+  uploadedDocs: propUploadedDocs,
   ledgerRecords,
   initialTab,
   onViewDoc,
@@ -84,12 +84,29 @@ export function GstWorkspaceView({
   const [activeTab, setActiveTab] = useState<GstTab>(initialTab || "gstr3b");
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<string>("2026-Q2");
+  const [fetchedDocs, setFetchedDocs] = useState<any[]>([]);
 
-  useEffect(() => {
-    if (initialTab) {
-      setActiveTab(initialTab);
-    }
-  }, [initialTab]);
+  // Combine prop uploadedDocs and locally fetched docs
+  const effectiveDocs = useMemo(() => {
+    const map = new Map<string, any>();
+    (propUploadedDocs || []).forEach((d) => { if (d?.id) map.set(d.id, d); });
+    (fetchedDocs || []).forEach((d) => {
+      if (d?.id) {
+        const existing = map.get(d.id);
+        if (!existing || (!existing.metadata_ && d.metadata_)) {
+          map.set(d.id, { ...existing, ...d });
+        }
+      }
+    });
+    return Array.from(map.values());
+  }, [propUploadedDocs, fetchedDocs]);
+
+  // Master HSN/SAC uploaded source documents list
+  const masterHsnDocuments = useMemo(() => {
+    return effectiveDocs.filter(
+      (d) => d.document_category === "hsn_sac" || d.document_type === "hsn_sac"
+    );
+  }, [effectiveDocs]);
 
   // Extract master HSN/SAC catalog from uploaded documents
   const masterHsnItems = useMemo(() => {
@@ -105,11 +122,15 @@ export function GstWorkspaceView({
       fileName: string;
     }> = [];
 
-    (uploadedDocs || []).forEach((d) => {
+    effectiveDocs.forEach((d) => {
       if (d.document_category === "hsn_sac" || d.document_type === "hsn_sac") {
         let metaObj: any = {};
         if (typeof d.metadata_ === "string") {
           try { metaObj = JSON.parse(d.metadata_); } catch (_) {}
+        } else if (d.metadata_ && typeof d.metadata_ === "object") {
+          metaObj = d.metadata_;
+        } else if (typeof d.metadata === "string") {
+          try { metaObj = JSON.parse(d.metadata); } catch (_) {}
         } else if (typeof d.metadata === "object") {
           metaObj = d.metadata || {};
         }
@@ -117,13 +138,13 @@ export function GstWorkspaceView({
         const tableRows = metaObj?.table_data?.rows || metaObj?.line_items || [];
         if (Array.isArray(tableRows) && tableRows.length > 0) {
           tableRows.forEach((r: any) => {
-            const hsnVal = r.hsn_code || r.hsn || r.hsn_sac || r["HSN/SAC"] || r["HSN / SAC"] || "";
-            const descVal = r.item_name || r.description || r.item_description || r["Description"] || r["Item Description"] || "";
+            const hsnVal = r.hsn_code || r.hsn || r.hsn_sac || r["HSN/SAC"] || r["HSN / SAC"] || r["hsn_sac"] || "";
+            const descVal = r.item_name || r.description || r.item_description || r["Description"] || r["Item Description"] || r["item_description"] || "";
             const typeVal = r.type || r["Type"] || (String(hsnVal).length >= 4 ? "HSN" : "SAC");
-            const gstVal = r.gst ?? r.gst_rate ?? r["GST %"] ?? "18";
-            const cgstVal = r.cgst ?? r.cgst_rate ?? r["CGST %"] ?? (Number(gstVal) / 2);
-            const sgstVal = r.sgst ?? r.sgst_rate ?? r["SGST %"] ?? (Number(gstVal) / 2);
-            const igstVal = r.igst ?? r.igst_rate ?? r["IGST %"] ?? gstVal;
+            const gstVal = r.gst ?? r.gst_rate ?? r["GST %"] ?? r["gst"] ?? "18";
+            const cgstVal = r.cgst ?? r.cgst_rate ?? r["CGST %"] ?? r["cgst"] ?? (Number(gstVal) / 2);
+            const sgstVal = r.sgst ?? r.sgst_rate ?? r["SGST %"] ?? r["sgst"] ?? (Number(gstVal) / 2);
+            const igstVal = r.igst ?? r.igst_rate ?? r["IGST %"] ?? r["igst"] ?? gstVal;
 
             if (hsnVal || descVal) {
               items.push({
@@ -144,10 +165,19 @@ export function GstWorkspaceView({
     });
 
     return items;
-  }, [uploadedDocs]);
+  }, [effectiveDocs]);
 
   const [hsnSubView, setHsnSubView] = useState<"master" | "table12">("master");
   const [hsnSearch, setHsnSearch] = useState<string>("");
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+      if (initialTab === "hsn") {
+        setHsnSubView("master");
+      }
+    }
+  }, [initialTab]);
 
   const filteredMasterHsn = useMemo(() => {
     if (!hsnSearch.trim()) return masterHsnItems;
@@ -187,13 +217,14 @@ export function GstWorkspaceView({
     const periodParam = selectedPeriod && selectedPeriod !== "all" ? `&period=${selectedPeriod}` : "";
 
     try {
-      const [r1, rHsn, r2, r3, rDisc, rRecords] = await Promise.allSettled([
+      const [r1, rHsn, r2, r3, rDisc, rRecords, rDocs] = await Promise.allSettled([
         fetch(`${base}/gst/reconciliation/gstr1?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/table12-hsn?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/gstr2b?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/gstr3b?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/reconciliation/discrepancies?client_id=${clientId}${periodParam}`, { headers }).then((r) => (r.ok ? r.json() : null)),
         fetch(`${base}/gst/records/${clientId}${selectedPeriod && selectedPeriod !== "all" ? `?period=${selectedPeriod}` : ""}`, { headers }).then((r) => (r.ok ? r.json() : null)),
+        fetch(`${base}/invoices/${clientId}`, { headers }).then((r) => (r.ok ? r.json() : null)),
       ]);
 
       if (r1.status === "fulfilled" && r1.value?.data) setGstr1Data(r1.value.data);
@@ -202,6 +233,7 @@ export function GstWorkspaceView({
       if (r3.status === "fulfilled" && r3.value?.data) setGstr3bData(r3.value.data);
       if (rDisc.status === "fulfilled" && rDisc.value?.data) setDiscrepancyData(rDisc.value.data);
       if (rRecords.status === "fulfilled" && rRecords.value?.data) setFilingRecords(rRecords.value.data);
+      if (rDocs.status === "fulfilled" && Array.isArray(rDocs.value?.data)) setFetchedDocs(rDocs.value.data);
     } catch (err) {
       console.error("[GST] Failed to load GST reconciliation data:", err);
     } finally {
@@ -214,10 +246,10 @@ export function GstWorkspaceView({
   }, [clientId, selectedPeriod]);
 
   // ── 4-State Governance Counts (Design Principle 5) ─────────────
-  const extractedCount = useMemo(() => uploadedDocs.length, [uploadedDocs]);
+  const extractedCount = useMemo(() => effectiveDocs.length, [effectiveDocs]);
   const verifiedCount = useMemo(
-    () => uploadedDocs.filter((d) => d.status === "verified").length,
-    [uploadedDocs]
+    () => effectiveDocs.filter((d) => d.status === "verified").length,
+    [effectiveDocs]
   );
   const postedCount = useMemo(
     () => ledgerRecords.filter((r) => r.status === "posted").length,
@@ -1514,6 +1546,58 @@ export function GstWorkspaceView({
                       {filteredMasterHsn.length} Tariff Record{filteredMasterHsn.length === 1 ? "" : "s"}
                     </Badge>
                   </div>
+
+                  {/* List of Uploaded HSN / SAC Reference Documents */}
+                  {masterHsnDocuments.length > 0 && (
+                    <div className="rounded-lg border border-border/70 bg-card p-3 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                          <FileSpreadsheet className="size-3.5 text-primary" /> Uploaded HSN / SAC Master Documents ({masterHsnDocuments.length})
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Reference files used for tax classification
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                        {masterHsnDocuments.map((d) => (
+                          <div
+                            key={d.id}
+                            className="flex items-center justify-between p-2 rounded-md bg-muted/30 border border-border/60 hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <p className="text-xs font-medium text-foreground truncate flex items-center gap-1.5">
+                                <FileText className="size-3 text-muted-foreground shrink-0" />
+                                {d.file_name || "HSN_SAC_master.pdf"}
+                              </p>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] px-1 py-0 h-3.5 ${
+                                    d.status === "verified"
+                                      ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                                      : "border-warning/30 text-warning bg-warning/10"
+                                  }`}
+                                >
+                                  {d.status === "verified" ? "Verified" : d.status || "Uploaded"}
+                                </Badge>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {d.file_size || "PDF"}
+                                </span>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => onViewDoc(d.id)}
+                              className="h-7 px-2 text-xs text-primary hover:bg-primary/10 gap-1 shrink-0"
+                            >
+                              <Eye className="size-3" /> View
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="rounded-lg border border-border/70 overflow-x-auto">
                     <Table className="text-xs">

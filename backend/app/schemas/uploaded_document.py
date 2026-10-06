@@ -343,6 +343,7 @@ class UploadedDocumentListItem(BaseModel):
     status: str
     uploaded_by: Optional[str] = None
     uploaded_at: datetime
+    metadata_: Optional[str] = None
 
     class Config:
         from_attributes = True
