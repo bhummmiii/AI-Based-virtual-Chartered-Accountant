@@ -77,6 +77,9 @@ class GstReconciliationService:
         to_date: Optional[date]
     ) -> Tuple[Optional[date], Optional[date]]:
         """Parse period string (e.g. '2026-07' or 'Q1-2026') or use from_date / to_date."""
+        if period and period.strip().lower() in ("all", "all available", "all_available"):
+            return None, None
+
         if from_date and to_date:
             return from_date, to_date
 
@@ -1788,8 +1791,10 @@ class GstReconciliationService:
                 continue
 
             je = posted_je_map[d.id]
-            # Exclude non-sales voucher types (payment, receipt, contra)
-            if (je.entry_type or "").lower() in ("payment", "receipt", "contra"):
+            # Exclude non-sales voucher types (payment, receipt, contra, purchase)
+            if (je.entry_type or "").lower() in ("payment", "receipt", "contra", "purchase"):
+                continue
+            if je.voucher_template and je.voucher_template not in ("T1", "T3", "T4"):
                 continue
 
             # Direction must be OUTWARD
