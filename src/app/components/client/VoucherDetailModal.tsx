@@ -421,6 +421,11 @@ export function VoucherDetailModal({
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.05;
 
   const voucherType = (voucher.type || "JOURNAL").toUpperCase();
+  const isPaymentVoucher =
+    voucherType === "PAYMENT" ||
+    (journalDetail?.entry_type || "").toLowerCase() === "payment" ||
+    (voucher.refNo || "").startsWith("PMT-") ||
+    (voucher.rawDesc || "").toLowerCase().includes("challan");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -437,14 +442,16 @@ export function VoucherDetailModal({
                   <span
                     className={cn(
                       "text-xs px-2 py-0.5 rounded font-mono font-semibold uppercase tracking-wider",
-                      voucherType === "SALES" || voucherType === "INCOME"
+                      isPaymentVoucher
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        : voucherType === "SALES" || voucherType === "INCOME"
                         ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                         : voucherType === "PURCHASE" || voucherType === "EXPENSE"
                         ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
                         : "bg-blue-500/15 text-blue-600 dark:text-blue-400"
                     )}
                   >
-                    {voucherType} VOUCHER
+                    {isPaymentVoucher ? "PAYMENT VOUCHER" : `${voucherType} VOUCHER`}
                   </span>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
@@ -488,7 +495,7 @@ export function VoucherDetailModal({
           <div className="p-2.5 rounded-lg bg-muted/40 border border-border/50">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
               <Building2 className="size-3.5 text-primary/70 shrink-0" />
-              <span>Party Account</span>
+              <span>{isPaymentVoucher ? "Cash & Bank" : "Party Account"}</span>
             </div>
             <p className="font-semibold text-sm truncate text-foreground" title={voucher.partyName}>
               {voucher.partyName}
@@ -498,7 +505,7 @@ export function VoucherDetailModal({
           <div className="p-2.5 rounded-lg bg-muted/40 border border-border/50">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
               <Wallet className="size-3.5 text-primary/70 shrink-0" />
-              <span>Total Value</span>
+              <span>{isPaymentVoucher ? "Amount paid" : "Total Value"}</span>
             </div>
             <p className="font-mono font-bold text-sm text-foreground">
               {currency(voucher.amount)}
@@ -590,8 +597,8 @@ export function VoucherDetailModal({
           </div>
         </div>
 
-        {/* GST Commercial Breakdown (if taxes present) */}
-        {(voucher.taxableFormatted || voucher.taxBreakdown.length > 0) && (
+        {/* GST Commercial Breakdown (if taxes present and not a payment voucher) */}
+        {!isPaymentVoucher && (voucher.taxableFormatted || voucher.taxBreakdown.length > 0) && (
           <div className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-1.5">
             <div className="flex items-center justify-between">
               <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -622,6 +629,39 @@ export function VoucherDetailModal({
                 <p className="text-[10px] text-muted-foreground uppercase font-medium">Gross Invoice Amount</p>
                 <p className="font-mono font-bold text-sm text-foreground">
                   {currency(voucher.amount)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Voucher Settlement Summary */}
+        {isPaymentVoucher && (
+          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                <Receipt className="size-3.5 text-amber-600 dark:text-amber-400" />
+                Statutory Tax Settlement Summary
+              </h5>
+              <span className="text-[11px] text-muted-foreground font-mono">Challan Payment</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-0.5">
+              <div className="p-2 rounded bg-background border border-border/40">
+                <p className="text-[10px] text-muted-foreground uppercase font-medium">Payment Mode</p>
+                <p className="font-mono font-semibold text-sm text-emerald-600 dark:text-emerald-400">
+                  Electronic Cash Ledger
+                </p>
+              </div>
+              <div className="p-2 rounded bg-background border border-border/40">
+                <p className="text-[10px] text-muted-foreground uppercase font-medium">Amount Paid</p>
+                <p className="font-mono font-bold text-sm text-foreground">
+                  {currency(voucher.amount)}
+                </p>
+              </div>
+              <div className="p-2 rounded bg-background border border-border/40">
+                <p className="text-[10px] text-muted-foreground uppercase font-medium">Accounting Effect</p>
+                <p className="font-mono font-semibold text-sm text-blue-600 dark:text-blue-400">
+                  Tax Liability Cleared
                 </p>
               </div>
             </div>

@@ -362,6 +362,10 @@ class GstReconciliationService:
                 continue
 
             je = posted_je_map[d.id]
+            # Exclude non-sales voucher types (payment, receipt, contra)
+            if (je.entry_type or "").lower() in ("payment", "receipt", "contra") or je.voucher_template == "PAYMENT":
+                continue
+
             # Exclude purchase vouchers from outward register
             has_purchase_lines = any(
                 ((l.account.role if l.account else None) or determine_account_role(l.account.account_code, l.account.account_name, l.account.account_type) if l.account else None) in ("PURCHASE", "PURCHASE_RETURN", "INPUT_CGST", "INPUT_SGST", "INPUT_IGST")
@@ -671,6 +675,8 @@ class GstReconciliationService:
             JournalEntry.client_id == client_id,
             JournalEntry.status == "posted",
             JournalEntry.is_reversed == False,
+            JournalEntry.entry_type.notin_(["payment", "receipt", "contra"]),
+            or_(JournalEntry.voucher_template.is_(None), JournalEntry.voucher_template != "PAYMENT"),
         )
 
         if start_d:
@@ -802,6 +808,10 @@ class GstReconciliationService:
                 continue
 
             je = posted_je_map[d.id]
+            # Exclude non-purchase voucher types (payment, receipt, contra)
+            if (je.entry_type or "").lower() in ("payment", "receipt", "contra") or je.voucher_template == "PAYMENT":
+                continue
+
             # Sales-side notes or documents must never appear in purchase register (D3)
             has_sales_lines = any(
                 ((l.account.role if l.account else None) or determine_account_role(l.account.account_code, l.account.account_name, l.account.account_type) if l.account else None) in ("SALES", "SALES_RETURN", "OTHER_INCOME", "OUTPUT_CGST", "OUTPUT_SGST", "OUTPUT_IGST")

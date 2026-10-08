@@ -1048,11 +1048,18 @@ export function GstWorkspaceView({
                     <div className="flex justify-between"><span>SGST:</span><span>{formatGstCurrency(gstr3bData?.itc_reversal_payable_sgst ?? 0)}</span></div>
                   </div>
                   <div className="rounded border border-amber-500/20 bg-background/50 p-2 space-y-1 font-mono">
-                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Carry-Forward ITC</span>
+                    <span className="text-[10px] uppercase font-semibold text-muted-foreground block">Closing ITC Balance Carried Forward</span>
                     <div className="flex justify-between"><span>IGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_igst ?? 0)}</span></div>
                     <div className="flex justify-between"><span>CGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_cgst ?? 0)}</span></div>
                     <div className="flex justify-between"><span>SGST:</span><span>{formatGstCurrency(gstr3bData?.itc_carried_forward_sgst ?? 0)}</span></div>
                   </div>
+                </div>
+
+                <div className="rounded bg-muted/40 border border-border/60 p-2.5 text-xs flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+                  <span className="font-medium text-foreground">Closing ITC Balance Carried Forward to Next Period:</span>
+                  <span className="font-mono font-semibold text-foreground">
+                    CGST {formatGstCurrency(gstr3bData?.itc_carried_forward_cgst ?? 0)}, SGST {formatGstCurrency(gstr3bData?.itc_carried_forward_sgst ?? 0)}, IGST {formatGstCurrency(gstr3bData?.itc_carried_forward_igst ?? 0)}
+                  </span>
                 </div>
 
                 {gstr3bData?.has_negative_itc_head && (
