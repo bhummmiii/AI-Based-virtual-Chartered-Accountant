@@ -641,13 +641,22 @@ class AccountingMappingService:
             entry_type = "journal"
             if is_inward:
                 vendor_name = doc.vendor or "Vendor"
-                party_gst = doc.gstin
+                party_gst = doc.gstin if (doc.gstin and doc.gstin != client_gstin) else None
                 if client_name and doc.vendor and (client_name.lower() in doc.vendor.lower() or doc.vendor.lower() in client_name.lower()) and doc.customer:
                     vendor_name = doc.customer
                     party_gst = meta_customer_gstin or None
                 elif client_gstin and (meta_supplier_gstin == client_gstin or (doc.gstin and doc.gstin == client_gstin)) and doc.customer:
                     vendor_name = doc.customer
                     party_gst = meta_customer_gstin or None
+
+                if not party_gst or (client_gstin and party_gst == client_gstin):
+                    import re
+                    all_gstins = re.findall(r"[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}", raw_text_content)
+                    for candidate in all_gstins:
+                        if candidate.upper() != client_gstin:
+                            party_gst = candidate.upper()
+                            break
+
                 creditor_acc = get_acc("CREDITORS", "2010", "1010")
                 purchase_return_acc = get_acc("PURCHASE_RETURN", "5020", "5010")
                 cgst_acc = get_acc("INPUT_CGST", "1210")
@@ -832,6 +841,38 @@ class AccountingMappingService:
 
         lines = debit_lines + credit_lines
 
+        # Decide voucher template and header counterparties
+        template = "T1"
+        header_party_name = None
+        header_party_gstin = None
+
+        if cat in {"sales_records", "b2c_invoice", "b2b_invoice", "e_invoice"}:
+            template = "T1"
+            header_party_name = customer_name
+            header_party_gstin = rec_gst or None
+        elif cat in {"purchase_records", "purchase_invoice", "bills"}:
+            template = "T2"
+            header_party_name = vendor_name
+            header_party_gstin = sup_gst or None
+        elif cat == "credit_note":
+            template = "T3" if is_outward else "T5"
+            header_party_name = customer_name if is_outward else vendor_name
+            header_party_gstin = (rec_gst if is_outward else sup_gst) or None
+        elif cat == "debit_note":
+            template = "T4" if is_outward else "T6"
+            header_party_name = customer_name if is_outward else vendor_name
+            header_party_gstin = (rec_gst if is_outward else (party_gst or sup_gst)) or None
+        elif cat == "gst_challan":
+            template = "PAYMENT"
+            header_party_name = "GST Tax Authority (Government Treasury)"
+            header_party_gstin = None
+
+        # Validation SELF_PARTY: counterparty GSTIN equal to client's own GSTIN -> flag, do not post
+        if header_party_gstin and client_gstin and header_party_gstin.strip().upper() == client_gstin.strip().upper():
+            raise BadRequestException(
+                detail=f"SELF_PARTY: Counterparty GSTIN ({header_party_gstin}) cannot be equal to client's own GSTIN ({client_gstin})."
+            )
+
         narration = f"{entry_type.upper()} Voucher | Ref: {ref_no} | Gross: ₹{gross_amount} | Linked Document: {doc.id}"
 
         return JournalEntryCreate(
@@ -841,5 +882,8 @@ class AccountingMappingService:
             entry_type=entry_type,
             narration=narration,
             reference_number=ref_no,
+            counterparty_name=header_party_name,
+            counterparty_gstin=header_party_gstin,
+            voucher_template=template,
             lines=lines,
         )

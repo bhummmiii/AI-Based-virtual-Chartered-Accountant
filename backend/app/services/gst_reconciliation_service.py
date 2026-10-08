@@ -784,7 +784,7 @@ class GstReconciliationService:
             JournalEntry.is_reversed == False,
         ).all()
         posted_je_map: Dict[uuid.UUID, JournalEntry] = {
-            je.document_id: je for je in posted_jes if je.document_id
+            je.document_id: je for je in posted_jes if je.document_id and not (je.entry_number or "").startswith("REV-")
         }
 
         filtered_docs: List[UploadedDocument] = []
@@ -836,8 +836,25 @@ class GstReconciliationService:
             je = posted_je_map[d.id]
             voucher_id = je.id
 
+            # Resolve counterparty name and GSTIN (the side whose GSTIN is NOT the client's)
+            p_name = getattr(je, "counterparty_name", None)
+            p_gstin = getattr(je, "counterparty_gstin", None)
+            if not p_name or (client.company_name and client.company_name.lower() in p_name.lower()):
+                if d.customer and (d.vendor and client.company_name and client.company_name.lower() in d.vendor.lower()):
+                    p_name = d.customer
+                else:
+                    p_name = d.vendor or d.customer or "Vendor"
+            if not p_gstin or (client_gstin and p_gstin == client_gstin):
+                if d.gstin and d.gstin != client_gstin:
+                    p_gstin = d.gstin
+                else:
+                    for line in je.lines:
+                        if line.party_gstin and line.party_gstin != client_gstin:
+                            p_gstin = line.party_gstin
+                            break
+
             # Section 16(2) compliance check: valid supplier GSTIN
-            has_gstin = bool(d.gstin and len(d.gstin.strip()) >= 15)
+            has_gstin = bool(p_gstin and len(p_gstin.strip()) >= 15)
 
             # Derive lines directly from posted voucher lines (R6/C1/C5)
             v_taxable = Decimal("0.00")
@@ -889,8 +906,8 @@ class GstReconciliationService:
                 voucher_id=voucher_id,
                 invoice_number=d.invoice_number or "UNASSIGNED",
                 invoice_date=d.invoice_date,
-                party_name=d.vendor or d.customer,
-                party_gstin=d.gstin,
+                party_name=p_name,
+                party_gstin=p_gstin,
                 document_category=d.document_category,
                 taxable_amount=v_taxable,
                 cgst=v_cgst,

@@ -193,6 +193,13 @@ class JournalEntryService:
         entry_num = cls.generate_next_entry_number(db, client_id, payload.entry_type)
         now_ts = datetime.now(timezone.utc)
 
+        # 3b. Counterparty Validation: SELF_PARTY
+        if payload.counterparty_gstin and client.gst_number:
+            if payload.counterparty_gstin.strip().upper() == client.gst_number.strip().upper():
+                raise BadRequestException(
+                    detail=f"SELF_PARTY: Counterparty GSTIN ({payload.counterparty_gstin}) cannot be equal to client's own GSTIN ({client.gst_number})."
+                )
+
         # 4. Create Header
         header = JournalEntry(
             client_id=client_id,
