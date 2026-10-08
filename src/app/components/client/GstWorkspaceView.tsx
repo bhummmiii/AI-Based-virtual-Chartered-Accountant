@@ -81,9 +81,14 @@ export function GstWorkspaceView({
   onViewDoc,
   onViewVoucher,
 }: GstWorkspaceViewProps) {
+  const isQuarterly = (returnFrequency || "").toLowerCase().includes("quarter");
+
   const [activeTab, setActiveTab] = useState<GstTab>(initialTab || "gstr3b");
   const [loading, setLoading] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("2026-Q2");
+  // Initialise the period based on the client's filing frequency
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(
+    isQuarterly ? "2026-Q2" : "2026-09"
+  );
   const [fetchedDocs, setFetchedDocs] = useState<any[]>([]);
 
   // Combine prop uploadedDocs and locally fetched docs
@@ -652,18 +657,43 @@ export function GstWorkspaceView({
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
+              {/* Filing frequency badge */}
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                  isQuarterly
+                    ? "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400"
+                    : "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400"
+                )}
+              >
+                <Calendar className="size-3 mr-1" />
+                {isQuarterly ? "Quarterly" : "Monthly"}
+              </span>
               <span className="text-xs text-muted-foreground font-medium">Period:</span>
               <select
                 value={selectedPeriod}
                 onChange={(e) => setSelectedPeriod(e.target.value)}
                 className="h-8 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
               >
-                <option value="2026-Q2">Q2 FY 2026-27 (Jul–Sep)</option>
-                <option value="2026-Q1">Q1 FY 2026-27 (Apr–Jun)</option>
-                <option value="2026-09">Sep 2026</option>
-                <option value="2026-08">Aug 2026</option>
-                <option value="2026-07">Jul 2026</option>
-                <option value="all">All Available</option>
+                {isQuarterly ? (
+                  <>
+                    <option value="2026-Q2">Q2 FY 2026-27 (Jul–Sep)</option>
+                    <option value="2026-Q1">Q1 FY 2026-27 (Apr–Jun)</option>
+                    <option value="2025-Q4">Q4 FY 2025-26 (Jan–Mar)</option>
+                    <option value="2025-Q3">Q3 FY 2025-26 (Oct–Dec)</option>
+                    <option value="all">All Available</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="2026-09">Sep 2026</option>
+                    <option value="2026-08">Aug 2026</option>
+                    <option value="2026-07">Jul 2026</option>
+                    <option value="2026-06">Jun 2026</option>
+                    <option value="2026-05">May 2026</option>
+                    <option value="2026-04">Apr 2026</option>
+                    <option value="all">All Available</option>
+                  </>
+                )}
               </select>
             </div>
             <Button

@@ -149,6 +149,26 @@ export interface ClientDashboard {
 export type ClientCreatePayload = Omit<Client, "id" | "avatar" | "lastActivity" | "audit" | "tax">;
 export type ClientUpdatePayload = Partial<ClientCreatePayload>;
 
+export interface ClientOverviewData {
+  client_id: string;
+  company_name: string;
+  risk_level: string;
+  compliance_status: string;
+  gst_status: string | null;
+  tax_status: string | null;
+  audit_status: string | null;
+  annual_revenue: number;
+  expenses: number;
+  net_profit: number;
+  contact_person: string | null;
+  contact_number: string | null;
+  email_address: string | null;
+  location: string | null;
+  client_type: string | null;
+  billing_cycle: string | null;
+  return_frequency: string | null;
+}
+
 // ── Service ───────────────────────────────────────────────────
 export const clientService = {
   /** Fetch all clients (workspace list). */
@@ -168,6 +188,11 @@ export const clientService = {
   /** Full client dashboard — called when a workspace card is clicked. */
   async getDashboard(dbId: string): Promise<ClientDashboard> {
     return api.get<ClientDashboard>(`/clients/${dbId}`);
+  },
+
+  /** Live client overview KPIs with actual financial calculations. */
+  async getOverview(dbId: string): Promise<ClientOverviewData> {
+    return api.get<ClientOverviewData>(`/clients/${dbId}/overview`);
   },
 
   /** Create a new client from the Add Client form. */

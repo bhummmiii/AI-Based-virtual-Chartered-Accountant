@@ -73,6 +73,7 @@ export type Client = {
   avatar: string;
   // Extended fields (stored in DB, not shown on workspace cards)
   clientType?: "Monthly" | "Quarterly";
+  return_frequency?: string;
   contactNumber?: string;
   emailAddress?: string;
   location?: string;

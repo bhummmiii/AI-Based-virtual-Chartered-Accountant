@@ -150,8 +150,6 @@ class ClientService:
             client_type=T_FE2DB.get(data.type, "company"),
             gst_number=data.gstin,
             pan_number=data.pan,
-            email=data.email,
-            phone=data.phone,
             address=data.address,
             city=data.city,
             state=data.state,
@@ -159,10 +157,13 @@ class ClientService:
             status=S_FE2DB.get(data.status, "active"),
             risk_level=R_FE2DB.get(data.risk, "low"),
             # new fields
-            billing_cycle=data.clientType.lower() if data.clientType else "monthly",
-            contact_number=data.contactNumber,
-            email_address=data.emailAddress,
-            location=data.location,
+            billing_cycle=(data.clientType or "monthly").lower(),
+            return_frequency=(data.clientType or "Monthly").capitalize(),
+            contact_number=data.contactNumber or data.phone,
+            email_address=data.emailAddress or data.email,
+            email=data.emailAddress or data.email,
+            phone=data.contactNumber or data.phone,
+            location=data.location or (f"{data.city}, {data.state}" if data.city and data.state else data.city or data.state or None),
         )
         client = self.repo.create(client)
 
@@ -279,6 +280,64 @@ class ClientService:
     # ── OVERVIEW ───────────────────────────────────────────────
     def get_client_overview(self, client_id, user_id: Optional[object] = None) -> ClientOverviewResponse:
         client = self._get_or_404(client_id, user_id=user_id)
+
+        # Compute actual financial metrics from posted ledger entries or seeded records
+        actual_rev = Decimal("0.00")
+        actual_exp = Decimal("0.00")
+        try:
+            from app.models.journal_entry import JournalEntry, JournalEntryLine
+            from app.models.chart_of_accounts import ChartOfAccounts
+            from sqlalchemy import func
+
+            rev_val = (
+                self.repo.db.query(
+                    func.coalesce(func.sum(JournalEntryLine.credit_amount), Decimal("0.00")) -
+                    func.coalesce(func.sum(JournalEntryLine.debit_amount), Decimal("0.00"))
+                )
+                .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+                .join(ChartOfAccounts, ChartOfAccounts.id == JournalEntryLine.account_id)
+                .filter(
+                    JournalEntry.client_id == client.id,
+                    JournalEntry.status == "posted",
+                    JournalEntry.is_reversed == False,
+                    ChartOfAccounts.role.in_(["SALES", "SALES_RETURN"])
+                )
+                .scalar()
+            )
+            if rev_val and rev_val > Decimal("0.00"):
+                actual_rev = rev_val
+            else:
+                latest_gst = self.repo.db.query(GSTRecord).filter(GSTRecord.client_id == client.id).first()
+                if latest_gst and latest_gst.taxable_amount:
+                    actual_rev = latest_gst.taxable_amount
+
+            exp_val = (
+                self.repo.db.query(
+                    func.coalesce(func.sum(JournalEntryLine.debit_amount), Decimal("0.00")) -
+                    func.coalesce(func.sum(JournalEntryLine.credit_amount), Decimal("0.00"))
+                )
+                .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+                .join(ChartOfAccounts, ChartOfAccounts.id == JournalEntryLine.account_id)
+                .filter(
+                    JournalEntry.client_id == client.id,
+                    JournalEntry.status == "posted",
+                    JournalEntry.is_reversed == False,
+                    ChartOfAccounts.role.in_(["PURCHASE", "PURCHASE_RETURN", "EXPENSE", "DIRECT_EXPENSE", "INDIRECT_EXPENSE"])
+                )
+                .scalar()
+            )
+            if exp_val and exp_val > Decimal("0.00"):
+                actual_exp = exp_val
+        except Exception:
+            pass
+
+        loc = client.location or (f"{client.city}, {client.state}" if client.city and client.state else client.city or client.state or None)
+        c_num = client.contact_number or client.phone or None
+        e_addr = client.email_address or client.email or None
+        c_type = T_DB2FE.get(client.client_type, client.client_type.title())
+        b_cycle = (client.billing_cycle or "monthly").capitalize()
+        r_freq = (client.return_frequency or ("Monthly" if b_cycle == "Monthly" else "Quarterly")).capitalize()
+
         return ClientOverviewResponse(
             client_id=str(client.id),
             company_name=client.company_name,
@@ -297,6 +356,16 @@ class ClientService:
             audit_status=A_DB2FE.get(
                 self.repo.get_latest_audit_status(client.id), "Pending"
             ),
+            annual_revenue=float(actual_rev),
+            expenses=float(actual_exp),
+            net_profit=float(actual_rev - actual_exp),
+            contact_person=client.contact_person,
+            contact_number=c_num,
+            email_address=e_addr,
+            location=loc,
+            client_type=c_type,
+            billing_cycle=b_cycle,
+            return_frequency=r_freq,
         )
 
     # ── UPDATE ─────────────────────────────────────────────────
@@ -335,10 +404,13 @@ class ClientService:
         # new fields
         if data.clientType is not None:
             patch["billing_cycle"] = data.clientType.lower()
+            patch["return_frequency"] = data.clientType.capitalize()
         if data.contactNumber is not None:
             patch["contact_number"] = data.contactNumber
+            patch["phone"] = data.contactNumber
         if data.emailAddress is not None:
             patch["email_address"] = data.emailAddress
+            patch["email"] = data.emailAddress
         if data.location is not None:
             patch["location"] = data.location
         client = self.repo.update(client, patch)
@@ -635,13 +707,50 @@ class ClientService:
             "exempt": "Filed",
             None: "Pending",
         }
+
+        actual_rev = Decimal("0.00")
+        try:
+            from app.models.journal_entry import JournalEntry, JournalEntryLine
+            from app.models.chart_of_accounts import ChartOfAccounts
+            from sqlalchemy import func
+
+            rev_val = (
+                self.repo.db.query(
+                    func.coalesce(func.sum(JournalEntryLine.credit_amount), Decimal("0.00")) -
+                    func.coalesce(func.sum(JournalEntryLine.debit_amount), Decimal("0.00"))
+                )
+                .join(JournalEntry, JournalEntry.id == JournalEntryLine.journal_entry_id)
+                .join(ChartOfAccounts, ChartOfAccounts.id == JournalEntryLine.account_id)
+                .filter(
+                    JournalEntry.client_id == client.id,
+                    JournalEntry.status == "posted",
+                    JournalEntry.is_reversed == False,
+                    ChartOfAccounts.role.in_(["SALES", "SALES_RETURN"])
+                )
+                .scalar()
+            )
+            if rev_val and rev_val > Decimal("0.00"):
+                actual_rev = rev_val
+            else:
+                latest_gst = self.repo.db.query(GSTRecord).filter(GSTRecord.client_id == client.id).first()
+                if latest_gst and latest_gst.taxable_amount:
+                    actual_rev = latest_gst.taxable_amount
+        except Exception:
+            pass
+
+        loc = client.location or (f"{client.city}, {client.state}" if client.city and client.state else client.city or client.state or None)
+        c_num = client.contact_number or client.phone or None
+        e_addr = client.email_address or client.email or None
+        c_type = (client.billing_cycle or "monthly").capitalize()
+        r_freq = (client.return_frequency or ("Monthly" if c_type == "Monthly" else "Quarterly")).capitalize()
+
         return ClientCardResponse(
             id=client.client_code,
             name=client.contact_person,
             company=client.company_name,
             type=T_DB2FE.get(client.client_type, client.client_type.title()),
             gstin=client.gst_number,
-            revenue=0.0,
+            revenue=float(actual_rev),
             status=S_DB2FE.get(client.status, "Active"),
             gst=G_DB2FE.get(gst_s, "Pending"),
             audit=A_DB2FE.get(audit_s, "Pending"),
@@ -650,6 +759,11 @@ class ClientService:
             lastActivity=_rel_time(client.updated_at),
             avatar=_initials(client.company_name),
             db_id=str(client.id),
+            return_frequency=r_freq,
+            clientType=c_type,
+            contactNumber=c_num,
+            emailAddress=e_addr,
+            location=loc,
         )
 
     @staticmethod

@@ -166,6 +166,10 @@ class ClientCardResponse(BaseModel):
     avatar: str = "??"
     db_id: str  # UUID string — used for PUT/DELETE/dashboard API calls
     return_frequency: Optional[str] = "Quarterly"
+    clientType: Optional[str] = "Monthly"
+    contactNumber: Optional[str] = None
+    emailAddress: Optional[str] = None
+    location: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -222,6 +226,16 @@ class ClientOverviewResponse(BaseModel):
     gst_status: Optional[str] = None
     tax_status: Optional[str] = None
     audit_status: Optional[str] = None
+    annual_revenue: float = 0.0
+    expenses: float = 0.0
+    net_profit: float = 0.0
+    contact_person: Optional[str] = None
+    contact_number: Optional[str] = None
+    email_address: Optional[str] = None
+    location: Optional[str] = None
+    client_type: Optional[str] = None
+    billing_cycle: Optional[str] = None
+    return_frequency: Optional[str] = "Quarterly"
 
 
 # ── Activity history ──────────────────────────────────────────

@@ -43,6 +43,7 @@ const initials = (company: string) =>
 
 /** Map a backend ClientCard to the frontend Client type. */
 function toClient(card: ClientCard): Client {
+  const isMonth = (card.clientType || card.return_frequency || "").toLowerCase().includes("month");
   return {
     id: card.id,                  // client_code, e.g. "C-1042"
     name: card.name,              // contact_person
@@ -57,6 +58,11 @@ function toClient(card: ClientCard): Client {
     risk: card.risk as Client["risk"],
     lastActivity: card.lastActivity ?? "Recently",
     avatar: card.avatar ?? initials(card.company),
+    clientType: isMonth ? "Monthly" : "Quarterly",
+    return_frequency: card.return_frequency ?? (isMonth ? "Monthly" : "Quarterly"),
+    contactNumber: card.contactNumber ?? "",
+    emailAddress: card.emailAddress ?? "",
+    location: card.location ?? "",
   };
 }
 

@@ -38,6 +38,7 @@ import {
   type ParsedLedgerTransaction,
 } from "../components/client/VoucherDetailModal";
 import { GstWorkspaceView } from "../components/client/GstWorkspaceView";
+import { ClientAiChatCard } from "../components/client/ClientAiChatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -49,13 +50,9 @@ import { Separator } from "../components/ui/separator";
 import { cn } from "../components/ui/utils";
 import { useApp } from "../context/AppContext";
 import { dbIdMap } from "../context/AppContext";
-import {
-  currency,
-  transactions,
-  gstReturns,
-  hsnCodes,
-  aiSuggestions,
-} from "../data/mock";
+import { clientService } from "../services/client.service";
+import { currency } from "../data/mock";
+import { chatbotService, type AIInsightItem } from "../services/chatbot.service";
 
 const sevMeta = {
   danger: { icon: AlertTriangle, cls: "text-destructive bg-destructive/10" },
@@ -126,6 +123,12 @@ export function ClientWorkspace() {
   // ── Document detail (View) state ───────────────────────────
   const [viewDocId, setViewDocId] = useState<string | null>(null);
   const [gstSubTab, setGstSubTab] = useState<string | undefined>(undefined);
+
+  // ── AI Insights tab state ──────────────────────────────────
+  const [aiInsights, setAiInsights] = useState<AIInsightItem[]>([]);
+  const [aiInsightsLoading, setAiInsightsLoading] = useState(false);
+  const [aiInsightsError, setAiInsightsError] = useState<string | null>(null);
+  const [aiInsightsFetched, setAiInsightsFetched] = useState(false);
 
   // Get the UUID db_id — must come after client guard so we compute it lazily
   const clientDbId = client ? (dbIdMap.get(client.id) ?? "") : "";
@@ -251,9 +254,41 @@ export function ClientWorkspace() {
     }
   };
 
+  const [overviewData, setOverviewData] = useState<any>(null);
+
+  const fetchOverview = async () => {
+    if (!clientDbId) return;
+    try {
+      const data = await clientService.getOverview(clientDbId);
+      if (data) setOverviewData(data);
+    } catch {
+      // silently ignore fallback
+    }
+  };
+
+  // ── Fetch AI insights from backend ────────────────────────
+  const fetchAiInsights = async (force = false) => {
+    if (!clientDbId) return;
+    if (aiInsightsFetched && !force) return;   // lazy: only fetch once unless forced
+    setAiInsightsLoading(true);
+    setAiInsightsError(null);
+    try {
+      const result = await chatbotService.getClientInsights(clientDbId);
+      setAiInsights(result.insights);
+      setAiInsightsFetched(true);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not load AI insights.";
+      setAiInsightsError(msg);
+    } finally {
+      setAiInsightsLoading(false);
+    }
+  };
+
   // Fetch documents or ledger records whenever tab is opened or clientDbId is available
   useEffect(() => {
     if (clientDbId) {
+      fetchOverview();
+      fetchLedger();
       if (tab === "invoices") {
         fetchDocs();
       } else if (tab === "accounting") {
@@ -261,12 +296,14 @@ export function ClientWorkspace() {
       } else if (tab === "gsttax") {
         fetchDocs();
         fetchLedger();
+      } else if (tab === "insights") {
+        fetchAiInsights();
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, clientDbId]);
 
-  // Compute live accounting ledger records with fallback to mock data
+  // Compute live accounting ledger records — NO mock fallback
   const displayTransactions: ParsedLedgerTransaction[] = useMemo(() => {
     if (ledgerRecords.length > 0) {
       return ledgerRecords.map((r) => {
@@ -312,35 +349,8 @@ export function ClientWorkspace() {
       });
     }
 
-    return transactions.map((t) => {
-      const isDebit = t.type === "Expense";
-      const parsed = parseLedgerDescription(
-        t.desc,
-        undefined,
-        t.type,
-        "",
-        t.account
-      );
-      return {
-        id: t.id,
-        date: t.date,
-        partyName: parsed.partyName,
-        refNo: parsed.refNo,
-        taxableAmount: null,
-        taxableFormatted: null,
-        taxBreakdown: [],
-        postedAt: null,
-        account: t.account,
-        type: t.type.toUpperCase(),
-        isDebit,
-        amount: t.amount,
-        debit: isDebit ? t.amount : 0,
-        credit: !isDebit ? t.amount : 0,
-        status: t.status,
-        documentId: undefined,
-        rawDesc: t.desc,
-      };
-    });
+    // No real data — return empty array (never show mock data)
+    return [];
   }, [ledgerRecords]);
 
   // Filter transactions by search query, voucher type, and status
@@ -375,8 +385,40 @@ export function ClientWorkspace() {
     );
   }
 
-  const expenses = Math.round(client.revenue * 0.52);
-  const profit = client.revenue - expenses;
+  // ── Metrics: only show real data – never fall back to mock / estimated values ──
+  const annualRevenue = useMemo(() => {
+    if (overviewData?.annual_revenue != null && overviewData.annual_revenue > 0) {
+      return Number(overviewData.annual_revenue);
+    }
+    // Sum posted credit-side (sales / income / receipt) vouchers from ledger
+    if (ledgerRecords.length > 0) {
+      const postedSales = ledgerRecords
+        .filter((r) => r.status === "posted" && ["sales", "income", "receipt"].includes((r.voucher_type || "").toLowerCase()))
+        .reduce((sum, r) => sum + (Number(r.credit) || 0) - (Number(r.debit) || 0), 0);
+      if (postedSales > 0) return postedSales;
+    }
+    // No real data at all → return 0 (do NOT use mock client.revenue)
+    return 0;
+  }, [overviewData, ledgerRecords]);
+
+  const expenses = useMemo(() => {
+    if (overviewData?.expenses != null && overviewData.expenses > 0) {
+      return Number(overviewData.expenses);
+    }
+    // Sum posted debit-side (purchase / expense / payment) vouchers from ledger
+    if (ledgerRecords.length > 0) {
+      const postedExpenses = ledgerRecords
+        .filter((r) => r.status === "posted" && ["purchase", "expense", "payment"].includes((r.voucher_type || "").toLowerCase()))
+        .reduce((sum, r) => sum + (Number(r.debit) || 0) - (Number(r.credit) || 0), 0);
+      if (postedExpenses > 0) return postedExpenses;
+    }
+    // No real data at all → return 0 (do NOT estimate from revenue)
+    return 0;
+  }, [overviewData, ledgerRecords]);
+
+  const profit = annualRevenue - expenses;
+  // True only when we have at least some real data from backend
+  const hasFinancialData = annualRevenue > 0 || expenses > 0;
 
   const tabs = [
     { v: "overview",    l: "Overview" },
@@ -425,25 +467,58 @@ export function ClientWorkspace() {
         {/* Overview */}
         <TabsContent value="overview" className="space-y-6">
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Metric label="Annual Revenue" value={currency(client.revenue)} icon={TrendingUp} tone="bg-success/10 text-success" />
-            <Metric label="Expenses" value={currency(expenses)} icon={TrendingDown} tone="bg-destructive/10 text-destructive" />
-            <Metric label="Net Profit" value={currency(profit)} icon={Wallet} tone="bg-primary/10 text-primary" />
+            <Metric label="Annual Revenue" value={hasFinancialData ? currency(annualRevenue) : "—"} icon={TrendingUp} tone="bg-success/10 text-success" />
+            <Metric label="Expenses" value={hasFinancialData ? currency(expenses) : "—"} icon={TrendingDown} tone="bg-destructive/10 text-destructive" />
+            <Metric label="Net Profit" value={hasFinancialData ? currency(profit) : "—"} icon={Wallet} tone="bg-primary/10 text-primary" />
             <Metric label="Risk Level" value={client.risk} icon={AlertTriangle} tone="bg-warning/10 text-warning" />
           </div>
+          {!hasFinancialData && (
+            <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-center text-xs text-muted-foreground">
+              <Info className="inline size-3.5 mr-1.5 opacity-70" />
+              Financial metrics will appear once invoices or accounting entries are uploaded for this client.
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader><CardTitle>Compliance Snapshot</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-1">
-                <div className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">GST Filing</p><StatusBadge value={client.gst} className="mt-2" /></div>
+              <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-border p-4">
+                  <p className="text-xs text-muted-foreground uppercase font-semibold">GST Return</p>
+                  <StatusBadge value={client.gst} className="mt-2" />
+                </div>
+                <div className="rounded-lg border border-border p-4">
+                  <p className="text-xs text-muted-foreground uppercase font-semibold">Filing Frequency</p>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary font-mono">
+                      {overviewData?.billing_cycle || client.clientType || client.return_frequency || "Quarterly"}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border p-4">
+                  <p className="text-xs text-muted-foreground uppercase font-semibold">Tax Compliance</p>
+                  <StatusBadge value={client.tax || "Pending"} className="mt-2" />
+                </div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Contact</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Contact Details</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <p className="flex items-center gap-2 text-muted-foreground"><User className="size-4" /> {client.name}</p>
-                <p className="flex items-center gap-2 text-muted-foreground"><Mail className="size-4" /> {client.name.split(" ")[0].toLowerCase()}@{client.company.split(" ")[0].toLowerCase()}.com</p>
-                <p className="flex items-center gap-2 text-muted-foreground"><Phone className="size-4" /> +91 98{client.id.replace(/\D/g, "")} 45678</p>
-                <p className="flex items-center gap-2 text-muted-foreground"><MapPin className="size-4" /> Mumbai, Maharashtra</p>
+                <p className="flex items-center gap-2 text-muted-foreground" title="Contact Person">
+                  <User className="size-4 text-foreground/70 shrink-0" />
+                  <span className="text-foreground font-medium">{overviewData?.contact_person || client.name || "—"}</span>
+                </p>
+                <p className="flex items-center gap-2 text-muted-foreground" title="Email Address">
+                  <Mail className="size-4 text-foreground/70 shrink-0" />
+                  <span className="truncate">{overviewData?.email_address || client.emailAddress || "—"}</span>
+                </p>
+                <p className="flex items-center gap-2 text-muted-foreground" title="Contact Number">
+                  <Phone className="size-4 text-foreground/70 shrink-0" />
+                  <span>{overviewData?.contact_number || client.contactNumber || "—"}</span>
+                </p>
+                <p className="flex items-center gap-2 text-muted-foreground" title="Business Location">
+                  <MapPin className="size-4 text-foreground/70 shrink-0" />
+                  <span>{overviewData?.location || client.location || "—"}</span>
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -671,6 +746,7 @@ export function ClientWorkspace() {
             clientCode={client?.id ?? clientId ?? ""}
             clientName={client?.company ?? ""}
             clientGstin={client?.gstin ?? ""}
+            returnFrequency={client?.clientType ?? "Monthly"}
             uploadedDocs={uploadedDocs}
             ledgerRecords={ledgerRecords}
             initialTab={gstSubTab as any}
@@ -904,23 +980,99 @@ export function ClientWorkspace() {
         {/* AI Insights */}
         <TabsContent value="insights" className="space-y-6">
           <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" /> AI Insights for {client.company}</CardTitle></CardHeader>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="size-4 text-primary" /> AI Insights for {client.company}
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fetchAiInsights(true)}
+                  disabled={aiInsightsLoading}
+                  className="text-xs"
+                >
+                  <RefreshCw className={cn("size-3.5 mr-1.5", aiInsightsLoading && "animate-spin")} />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
             <CardContent className="space-y-3">
-              {aiSuggestions.map((s, i) => {
-                const meta = sevMeta[s.severity as keyof typeof sevMeta];
-                return (
-                  <div key={s.id}>
-                    <div className="flex items-start gap-2.5">
-                      <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", meta.cls)}><meta.icon className="size-3.5" /></span>
-                      <p className="text-sm text-muted-foreground">{s.text}</p>
+              {/* Loading skeleton */}
+              {aiInsightsLoading && (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <span className="mt-0.5 size-6 shrink-0 rounded-md bg-muted animate-pulse" />
+                      <div className="flex-1 space-y-1.5 pt-0.5">
+                        <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
+                        <div className="h-3 w-1/2 rounded bg-muted animate-pulse" />
+                      </div>
                     </div>
-                    {i < aiSuggestions.length - 1 && <Separator className="mt-3" />}
+                  ))}
+                </div>
+              )}
+
+              {/* Error state */}
+              {!aiInsightsLoading && aiInsightsError && (
+                <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <div>
+                    <p className="font-medium">Could not load insights</p>
+                    <p className="mt-0.5 text-destructive/80">{aiInsightsError}</p>
                   </div>
-                );
-              })}
-              <Button className="mt-2" onClick={() => navigate("/app/assistant")}><Sparkles className="size-4" /> Ask AI about this client</Button>
+                </div>
+              )}
+
+              {/* Empty state — no data yet */}
+              {!aiInsightsLoading && !aiInsightsError && aiInsightsFetched && aiInsights.length === 0 && (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <Sparkles className="size-8 text-muted-foreground/40" />
+                  <p className="text-sm text-muted-foreground">
+                    No insights yet for this client.
+                  </p>
+                  <p className="text-xs text-muted-foreground/70">
+                    Upload invoices, accounting entries, or GST data to generate verified AI insights.
+                  </p>
+                </div>
+              )}
+
+              {/* Live insights list */}
+              {!aiInsightsLoading && aiInsights.length > 0 && (
+                <>
+                  {aiInsights.map((s, i) => {
+                    const meta = sevMeta[s.severity as keyof typeof sevMeta] ?? sevMeta.info;
+                    return (
+                      <div key={s.id}>
+                        <div className="flex items-start gap-2.5">
+                          <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md", meta.cls)}>
+                            <meta.icon className="size-3.5" />
+                          </span>
+                          <p className="text-sm text-muted-foreground">{s.text}</p>
+                        </div>
+                        {i < aiInsights.length - 1 && <Separator className="mt-3" />}
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/app/assistant?client=${client.id}`)}
+                  className="text-xs"
+                >
+                  <Sparkles className="size-3.5 mr-1.5 text-primary" />
+                  Open in Workspace-wide AI Assistant
+                </Button>
+              </div>
             </CardContent>
           </Card>
+
+          {/* Interactive Client-Scoped AI Assistant (Small Module) */}
+          <ClientAiChatCard client={client} clientDbId={clientDbId} />
         </TabsContent>
       </Tabs>
 

@@ -177,7 +177,7 @@ export function Workspace() {
       }
 
       // ── Value coercion helpers ───────────────────────────────────────
-      const VALID_TYPES  = ["Company", "Individual", "LLP", "Partnership"] as const;
+      const VALID_TYPES  = ["Company", "Individual"] as const;
       const VALID_STATUS = ["Active", "Review", "Inactive"] as const;
       const VALID_GST    = ["Filed", "Due", "Overdue"] as const;
       const VALID_RISK   = ["Low", "Medium", "High"] as const;

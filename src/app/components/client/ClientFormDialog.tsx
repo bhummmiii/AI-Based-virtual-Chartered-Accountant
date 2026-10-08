@@ -40,7 +40,7 @@ const empty: Draft = {
 // Simple validators — inline, no new deps
 function isValidPhone(v: string) {
   const digits = v.replace(/[\s\-\+\(\)]/g, "");
-  return /^\d{10,15}$/.test(digits);
+  return /^\d{10}$/.test(digits);
 }
 function isValidEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -79,7 +79,7 @@ export function ClientFormDialog({
     setTouched((t) => ({ ...t, [k]: true }));
 
   const phoneErr  = touched.contactNumber  && draft.contactNumber  && !isValidPhone(draft.contactNumber)
-    ? "Enter a valid 10–15 digit mobile number" : "";
+    ? "Enter a valid 10-digit mobile number" : "";
   const emailErr  = touched.emailAddress   && draft.emailAddress   && !isValidEmail(draft.emailAddress)
     ? "Enter a valid email address" : "";
   const locErr    = touched.location       && !draft.location?.trim()
@@ -137,7 +137,7 @@ export function ClientFormDialog({
               <Select value={draft.type} onValueChange={(v) => set("type", v as Client["type"])}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Company", "Individual", "LLP", "Partnership"].map((t) => (
+                  {["Company", "Individual"].map((t) => (
                     <SelectItem key={t} value={t}>{t}</SelectItem>
                   ))}
                 </SelectContent>
