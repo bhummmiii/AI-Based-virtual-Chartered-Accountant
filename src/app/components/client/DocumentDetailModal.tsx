@@ -21,7 +21,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import {
-  Download, X, FileText, Loader2, AlertCircle, Eye, FileDown, FileType, Sparkles,
+  Download, X, FileText, Loader2, AlertCircle, AlertTriangle, Eye, FileDown, FileType, Sparkles,
   Pencil, Plus, Trash2, Save, Info, FileQuestion, CheckCircle2, BookOpen, RefreshCw,
   Compass, Link as LinkIcon, ExternalLink, ArrowUpRight, Clock, FileSpreadsheet,
 } from "lucide-react";
@@ -1616,6 +1616,7 @@ export function DocumentDetailModal({
     return (allDocs || []).filter(
       (d) =>
         d.id !== docId &&
+        d.status !== "rejected" &&
         ["sales_records", "purchase_records", "b2b_invoice", "b2c_invoice"].includes(
           d.document_category
         )
@@ -2329,7 +2330,7 @@ export function DocumentDetailModal({
             {!isEditing ? (
               <>
                 {/* 1. Unverified State: Context-aware verification button */}
-                {doc && doc.status !== "verified" && (
+                {doc && doc.status !== "verified" && doc.status !== "rejected" && (
                   <Button
                     variant="default"
                     size="sm"
@@ -2344,6 +2345,14 @@ export function DocumentDetailModal({
                     )}
                     {verifying ? "Verifying…" : routing.verifyButtonText}
                   </Button>
+                )}
+
+                {/* 1b. Rejected State: Shows rejection reason, Verify button disabled/hidden */}
+                {doc && doc.status === "rejected" && (
+                  <Badge className="bg-destructive/15 text-destructive border-destructive/30 gap-1 py-1 px-2.5">
+                    <AlertTriangle className="size-3.5" />
+                    Rejected ({doc.rejection_reason || "DUPLICATE"})
+                  </Badge>
                 )}
 
                 {/* 2. Verified Badge */}
@@ -2596,10 +2605,12 @@ export function DocumentDetailModal({
                       "text-[11px] capitalize",
                       doc.status === "verified"
                         ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                        : doc.status === "rejected"
+                        ? "bg-destructive/15 text-destructive border-destructive/30"
                         : "bg-secondary text-muted-foreground"
                     )}
                   >
-                    Status · {String(doc.status)}
+                    Status · {doc.status === "rejected" ? `Rejected (${(doc as any).rejection_reason || "DUPLICATE"})` : String(doc.status)}
                   </Badge>
                 )}
               </div>

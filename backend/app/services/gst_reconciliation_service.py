@@ -1290,7 +1290,7 @@ class GstReconciliationService:
         discrepancies: List[GstDiscrepancyItem] = []
         docs = db.query(UploadedDocument).filter(
             UploadedDocument.client_id == client_id,
-            UploadedDocument.status != "rejected",
+            UploadedDocument.status != "voided",
         ).all()
 
         # Build maps
@@ -1353,100 +1353,164 @@ class GstReconciliationService:
             elif doc_tax == Decimal("0.00") and tot_amt > Decimal("0.00"):
                 doc_tax = (tot_amt * Decimal("18") / Decimal("118")).quantize(Decimal("0.01"))
 
-            # Check 1: Missing GSTIN on B2B documents
-            is_b2b = d.document_category == "b2b_invoice" or any(
-                corp in party_name.lower() for corp in ["ltd", "pvt", "limited", "corp", "llp", "inc"]
-            )
-            has_valid_gstin = bool(d.gstin and len(d.gstin.strip()) == 15)
+            # Rule F4(b): Documents with status "rejected" are excluded from all discrepancy rules EXCEPT the DUPLICATE alert itself
+            is_rejected = getattr(d, "status", "") == "rejected"
 
-            if is_b2b and not has_valid_gstin:
-                discrepancies.append(GstDiscrepancyItem(
-                    discrepancy_id=f"DISC-GSTIN-{d.id}",
-                    rule_code="MISSING_GSTIN",
-                    severity="HIGH",
-                    title="Missing or Invalid Counterparty GSTIN",
-                    description=f"Invoice #{d.invoice_number or 'UNKNOWN'} with party '{party_name}' lacks a valid 15-character GSTIN.",
-                    document_id=d.id,
-                    invoice_number=d.invoice_number,
-                    party_name=party_name,
-                    variance_amount=doc_tax,
-                    statutory_reference="Section 31 & Rule 46 CGST Rules (Tax Invoice requirements)",
-                    recommended_action="Obtain recipient/vendor GSTIN to ensure eligibility under Section 16(2)(aa).",
-                ))
+            if not is_rejected:
+                # Check 1: Missing GSTIN on B2B documents
+                is_b2b = d.document_category == "b2b_invoice" or any(
+                    corp in party_name.lower() for corp in ["ltd", "pvt", "limited", "corp", "llp", "inc"]
+                )
+                has_valid_gstin = bool(d.gstin and len(d.gstin.strip()) == 15)
 
-            # Check 2: Mathematical tax calculation variance
-            if tot_amt > 0 and taxable > 0:
-                expected_tot = taxable + cgst + sgst + igst
-                variance = abs(tot_amt - expected_tot)
-                if variance > Decimal("1.00"):
+                if is_b2b and not has_valid_gstin:
                     discrepancies.append(GstDiscrepancyItem(
-                        discrepancy_id=f"DISC-MATH-{d.id}",
-                        rule_code="TAX_MATH_MISMATCH",
+                        discrepancy_id=f"DISC-GSTIN-{d.id}",
+                        rule_code="MISSING_GSTIN",
                         severity="HIGH",
-                        title="Invoice Line Tax Math Discrepancy",
-                        description=f"Invoice #{d.invoice_number or 'UNKNOWN'} total (₹{tot_amt}) does not equal Taxable (₹{taxable}) + Taxes (₹{cgst+sgst+igst}). Discrepancy: ₹{variance}.",
-                        document_id=d.id,
-                        invoice_number=d.invoice_number,
-                        party_name=party_name,
-                        variance_amount=variance,
-                        statutory_reference="Section 15 CGST Act (Value of Taxable Supply)",
-                        recommended_action="Review OCR extraction lines or edit fields to fix tax calculation variance.",
-                    ))
-
-            # Check 3: Unposted Invoices (Include all qualifying invoice & note categories)
-            unposted_eligible_categories = [
-                "sales_records", "purchase_records", "b2b_invoice",
-                "e_invoice", "b2c_invoice", "credit_note", "debit_note"
-            ]
-            if d.document_category in unposted_eligible_categories and d.status == "verified":
-                if d.id not in doc_posted_map:
-                    discrepancies.append(GstDiscrepancyItem(
-                        discrepancy_id=f"DISC-UNPOSTED-{d.id}",
-                        rule_code="UNPOSTED_INVOICE",
-                        severity="MEDIUM",
-                        title="Verified Document Not Posted to Ledger",
-                        description=f"Document #{d.invoice_number or 'UNKNOWN'} is verified but not yet posted into the general ledger.",
+                        title="Missing or Invalid Counterparty GSTIN",
+                        description=f"Invoice #{d.invoice_number or 'UNKNOWN'} with party '{party_name}' lacks a valid 15-character GSTIN.",
                         document_id=d.id,
                         invoice_number=d.invoice_number,
                         party_name=party_name,
                         variance_amount=doc_tax,
-                        statutory_reference="Section 128 Companies Act (Books of Account maintenance)",
-                        recommended_action="Post the document draft voucher to General Ledger to update accounting balances.",
+                        statutory_reference="Section 31 & Rule 46 CGST Rules (Tax Invoice requirements)",
+                        recommended_action="Obtain recipient/vendor GSTIN to ensure eligibility under Section 16(2)(aa).",
                     ))
 
-            # Check 3b: Blocked / Needs Review Documents (D5)
-            if getattr(d, "status", "") in ("needs_review", "blocked"):
-                discrepancies.append(GstDiscrepancyItem(
-                    discrepancy_id=f"DISC-REVIEW-{d.id}",
-                    rule_code="NEEDS_REVIEW",
-                    severity="HIGH",
-                    title="Document Blocked / Requires CA Review",
-                    description=f"Document #{d.invoice_number or 'UNKNOWN'} ({d.document_category}) requires statutory review before posting.",
-                    document_id=d.id,
-                    invoice_number=d.invoice_number,
-                    party_name=party_name,
-                    variance_amount=doc_tax,
-                    statutory_reference="Statutory Pre-Posting Validation Gate",
-                    recommended_action="Resolve orientation or mismatch error in Document Review workspace.",
-                ))
+                # Check 2: Mathematical tax calculation variance
+                if tot_amt > 0 and taxable > 0:
+                    expected_tot = taxable + cgst + sgst + igst
+                    variance = abs(tot_amt - expected_tot)
+                    if variance > Decimal("1.00"):
+                        discrepancies.append(GstDiscrepancyItem(
+                            discrepancy_id=f"DISC-MATH-{d.id}",
+                            rule_code="TAX_MATH_MISMATCH",
+                            severity="HIGH",
+                            title="Invoice Line Tax Math Discrepancy",
+                            description=f"Invoice #{d.invoice_number or 'UNKNOWN'} total (₹{tot_amt}) does not equal Taxable (₹{taxable}) + Taxes (₹{cgst+sgst+igst}). Discrepancy: ₹{variance}.",
+                            document_id=d.id,
+                            invoice_number=d.invoice_number,
+                            party_name=party_name,
+                            variance_amount=variance,
+                            statutory_reference="Section 15 CGST Act (Value of Taxable Supply)",
+                            recommended_action="Review OCR extraction lines or edit fields to fix tax calculation variance.",
+                        ))
+
+                # Check 3: Unposted Invoices (Include all qualifying invoice & note categories)
+                # Rule F4(c): Compliance documents (e-way bill, challan, HSN master, an e-invoice linked to a posted invoice) never raise UNPOSTED_INVOICE
+                unposted_eligible_categories = [
+                    "sales_records", "purchase_records", "b2b_invoice",
+                    "e_invoice", "b2c_invoice", "credit_note", "debit_note"
+                ]
+                if d.document_category in unposted_eligible_categories and d.status == "verified":
+                    # Check if this is an e-invoice companion whose plain invoice is posted
+                    is_einvoice_companion_posted = False
+                    if d.document_category == "e_invoice":
+                        linked_id = getattr(d, "linked_document_id", None)
+                        if linked_id and linked_id in doc_posted_map:
+                            is_einvoice_companion_posted = True
+                        else:
+                            companion_doc = db.query(UploadedDocument).filter(
+                                UploadedDocument.client_id == client_id,
+                                UploadedDocument.invoice_number == d.invoice_number,
+                                UploadedDocument.id != d.id,
+                                UploadedDocument.document_category != "e_invoice",
+                            ).first()
+                            if companion_doc and companion_doc.id in doc_posted_map:
+                                is_einvoice_companion_posted = True
+
+                    if not is_einvoice_companion_posted and d.id not in doc_posted_map:
+                        discrepancies.append(GstDiscrepancyItem(
+                            discrepancy_id=f"DISC-UNPOSTED-{d.id}",
+                            rule_code="UNPOSTED_INVOICE",
+                            severity="MEDIUM",
+                            title="Verified Document Not Posted to Ledger",
+                            description=f"Document #{d.invoice_number or 'UNKNOWN'} is verified but not yet posted into the general ledger.",
+                            document_id=d.id,
+                            invoice_number=d.invoice_number,
+                            party_name=party_name,
+                            variance_amount=doc_tax,
+                            statutory_reference="Section 128 Companies Act (Books of Account maintenance)",
+                            recommended_action="Post the document draft voucher to General Ledger to update accounting balances.",
+                        ))
+
+                # Check 3b: Blocked / Needs Review Documents (D5)
+                if getattr(d, "status", "") in ("needs_review", "blocked"):
+                    discrepancies.append(GstDiscrepancyItem(
+                        discrepancy_id=f"DISC-REVIEW-{d.id}",
+                        rule_code="NEEDS_REVIEW",
+                        severity="HIGH",
+                        title="Document Blocked / Requires CA Review",
+                        description=f"Document #{d.invoice_number or 'UNKNOWN'} ({d.document_category}) requires statutory review before posting.",
+                        document_id=d.id,
+                        invoice_number=d.invoice_number,
+                        party_name=party_name,
+                        variance_amount=doc_tax,
+                        statutory_reference="Statutory Pre-Posting Validation Gate",
+                        recommended_action="Resolve orientation or mismatch error in Document Review workspace.",
+                    ))
 
             # Check 4: Duplicate Invoices
             inv_num = (d.invoice_number or "").strip().upper()
             gstin_key = (d.gstin or "").strip().upper()
             if inv_num and gstin_key:
-                key = (inv_num, gstin_key)
+                if cat in ("sales_records", "b2b_invoice", "b2c_invoice"):
+                    doc_family = "sales"
+                elif cat in ("purchase_records",):
+                    doc_family = "purchase"
+                elif cat in ("credit_note",):
+                    doc_family = "credit_note"
+                elif cat in ("debit_note",):
+                    doc_family = "debit_note"
+                else:
+                    doc_family = cat
+
+                key = (inv_num, gstin_key, doc_family)
                 if key in seen_invoices:
                     prev = seen_invoices[key]
+                    # The duplicate is the one without a posted voucher, else the later upload
+                    if d.id not in doc_posted_map and prev.id in doc_posted_map:
+                        dup_doc = d
+                        orig_doc = prev
+                    elif prev.id not in doc_posted_map and d.id in doc_posted_map:
+                        dup_doc = prev
+                        orig_doc = d
+                    else:
+                        d_time = d.uploaded_at or d.created_at
+                        prev_time = prev.uploaded_at or prev.created_at
+                        if d_time and prev_time and d_time < prev_time:
+                            dup_doc = prev
+                            orig_doc = d
+                        else:
+                            dup_doc = d
+                            orig_doc = prev
+
+                    # Calculate tax at risk strictly from the duplicate document (Rule R5 / F4)
+                    dup_tax = (
+                        Decimal(str(dup_doc.cgst or 0.00))
+                        + Decimal(str(dup_doc.sgst or 0.00))
+                        + Decimal(str(dup_doc.igst or 0.00))
+                        + Decimal(str(dup_doc.cess or 0.00))
+                    )
+                    if dup_tax == Decimal("0.00"):
+                        dup_tot = Decimal(str(dup_doc.amount or 0.00))
+                        dup_taxable = Decimal(str(dup_doc.taxable_amount or 0.00))
+                        if dup_tot > dup_taxable and dup_taxable > Decimal("0.00"):
+                            dup_tax = dup_tot - dup_taxable
+                        elif dup_tot > Decimal("0.00"):
+                            dup_tax = (dup_tot * Decimal("18") / Decimal("118")).quantize(Decimal("0.01"))
+
                     discrepancies.append(GstDiscrepancyItem(
-                        discrepancy_id=f"DISC-DUP-{d.id}",
+                        discrepancy_id=f"DISC-DUP-{dup_doc.id}",
                         rule_code="DUPLICATE_INVOICE",
                         severity="HIGH",
                         title="Duplicate Invoice Detected",
-                        description=f"Invoice #{inv_num} for GSTIN {gstin_key} already exists (Document #{prev.id}).",
-                        document_id=d.id,
-                        invoice_number=d.invoice_number,
+                        description=f"Invoice #{inv_num} for GSTIN {gstin_key} already exists (Document #{orig_doc.id}).",
+                        document_id=dup_doc.id,
+                        invoice_number=dup_doc.invoice_number,
                         party_name=party_name,
-                        variance_amount=tot_amt,
+                        variance_amount=dup_tax,
                         statutory_reference="Rule 48 CGST Rules (Manner of issuing invoice)",
                         recommended_action="Inspect duplicate upload and delete/void duplicate document to prevent double counting.",
                     ))

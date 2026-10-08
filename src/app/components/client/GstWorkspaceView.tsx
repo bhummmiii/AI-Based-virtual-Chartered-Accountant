@@ -253,7 +253,7 @@ export function GstWorkspaceView({
   // ── 4-State Governance Counts (Design Principle 5) ─────────────
   const extractedCount = useMemo(() => effectiveDocs.length, [effectiveDocs]);
   const verifiedCount = useMemo(
-    () => effectiveDocs.filter((d) => d.status === "verified").length,
+    () => effectiveDocs.filter((d) => d.status === "verified" && d.status !== "rejected").length,
     [effectiveDocs]
   );
   const postedCount = useMemo(
