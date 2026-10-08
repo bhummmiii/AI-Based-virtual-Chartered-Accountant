@@ -318,22 +318,55 @@ export function GstWorkspaceView({
       const day = freq.toLowerCase().includes("quarter") ? "13" : "11";
       return `${dueYear}-${pad(dueMonth)}-${day}`;
     } else if (form === "GSTR-3B") {
-      const day = freq.toLowerCase().includes("quarter") ? "22" : "20";
-      return `${dueYear}-${pad(dueMonth)}-${day}`;
+      if (freq.toLowerCase().includes("quarter")) {
+        const stateCode = clientGstin ? clientGstin.slice(0, 2) : "27";
+        const cat1States = ["22", "23", "24", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "37"];
+        const day = cat1States.includes(stateCode) ? "22" : "24";
+        return `${dueYear}-${pad(dueMonth)}-${day}`;
+      }
+      return `${dueYear}-${pad(dueMonth)}-20`;
     } else if (form === "GSTR-9") {
       return `${dueYear}-12-31`;
     }
     return `${dueYear}-${pad(dueMonth)}-20`;
   };
 
+  const formatPeriodDisplay = (periodStr: string, freq: string) => {
+    if (!periodStr || periodStr === "all") return "Select a period to record a filing";
+    if (periodStr.includes("-Q")) {
+      const [y, q] = periodStr.split("-Q");
+      const yr = parseInt(y, 10);
+      const nextYr = (yr + 1).toString().slice(-2);
+      return `Q${q} FY ${yr}-${nextYr}`;
+    }
+    if (freq && freq.toLowerCase().includes("quarter") && /^\d{4}-\d{2}$/.test(periodStr)) {
+      const [yStr, mStr] = periodStr.split("-");
+      const m = parseInt(mStr, 10);
+      const yr = parseInt(yStr, 10);
+      const q = m <= 6 ? 1 : m <= 9 ? 2 : m <= 12 ? 3 : 4;
+      const nextYr = (yr + 1).toString().slice(-2);
+      return `Q${q} FY ${yr}-${nextYr}`;
+    }
+    if (periodStr.includes("-")) {
+      const [y, m] = periodStr.split("-");
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const mIdx = parseInt(m, 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) {
+        return `${monthNames[mIdx]} ${y}`;
+      }
+    }
+    return periodStr;
+  };
+
   // Open modal with prefilled statutory values
   const openFilingModal = () => {
-    const targetPeriod = selectedPeriod && selectedPeriod !== "all" ? selectedPeriod : "2026-09";
+    const isPeriodSelected = selectedPeriod && selectedPeriod !== "all";
+    const targetPeriod = isPeriodSelected ? selectedPeriod : "";
     setFilingPeriod(targetPeriod);
     setFilingForm("GSTR-3B");
     setFilingTaxable(outwardTaxable.toFixed(2));
     setFilingTax(netCashPayable.toFixed(2));
-    setFilingDueDate(computeStatutoryDueDate(targetPeriod, "GSTR-3B", returnFrequency));
+    setFilingDueDate(targetPeriod ? computeStatutoryDueDate(targetPeriod, "GSTR-3B", returnFrequency) : "");
     setRecordModalOpen(true);
   };
 
@@ -346,12 +379,18 @@ export function GstWorkspaceView({
       setFilingTaxable(outwardTaxable.toFixed(2));
       setFilingTax(netCashPayable.toFixed(2));
     }
-    setFilingDueDate(computeStatutoryDueDate(filingPeriod, newForm, returnFrequency));
+    if (filingPeriod && filingPeriod !== "all") {
+      setFilingDueDate(computeStatutoryDueDate(filingPeriod, newForm, returnFrequency));
+    }
   };
 
   // ── Handle Record Filing Submission ────────────────────────────
   const handleRecordFiling = async () => {
     if (!clientId) return;
+    if (!filingPeriod || filingPeriod === "all") {
+      toast.error("Period required", { description: "Select a specific tax period to record a filing." });
+      return;
+    }
     if (isFilingBlocked) {
       toast.error("Statutory filing blocked", {
         description: highRiskCount > 0
@@ -1852,6 +1891,19 @@ export function GstWorkspaceView({
             </DialogDescription>
           </DialogHeader>
 
+          {/* Unselected Period Notice (F6) */}
+          {(!filingPeriod || filingPeriod === "all") && (
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-400 text-xs flex items-start gap-2.5">
+              <AlertCircle className="size-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-xs">Select a period to record a filing</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                  Return filings cannot be recorded under &quot;All Available&quot;. Please select a specific tax period to proceed.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Statutory Blocking Alert Banner */}
           {highRiskCount > 0 && (
             <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
@@ -1882,11 +1934,13 @@ export function GstWorkspaceView({
                 <Label className="text-xs">Filing Period</Label>
                 <Input
                   className="h-8 text-xs font-mono bg-muted/30 cursor-not-allowed"
-                  value={filingPeriod}
+                  value={filingPeriod && filingPeriod !== "all" ? formatPeriodDisplay(filingPeriod, returnFrequency) : "Select a period to record a filing"}
                   readOnly
-                  placeholder="2026-09"
+                  placeholder="Select a period to record a filing"
                 />
-                <p className="text-[10px] text-muted-foreground">Locked to selected period</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {filingPeriod && filingPeriod !== "all" ? "Locked to selected period" : "Period selection required"}
+                </p>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Return Form</Label>
@@ -1954,10 +2008,16 @@ export function GstWorkspaceView({
             <Button
               size="sm"
               onClick={handleRecordFiling}
-              disabled={submittingFiling || isFilingBlocked}
-              className={isFilingBlocked ? "opacity-50 cursor-not-allowed" : ""}
+              disabled={submittingFiling || isFilingBlocked || !filingPeriod || filingPeriod === "all"}
+              className={(isFilingBlocked || !filingPeriod || filingPeriod === "all") ? "opacity-50 cursor-not-allowed" : ""}
             >
-              {submittingFiling ? "Recording…" : isFilingBlocked ? "Filing Blocked" : "Save Filing Record"}
+              {submittingFiling
+                ? "Recording…"
+                : !filingPeriod || filingPeriod === "all"
+                ? "Select a Period"
+                : isFilingBlocked
+                ? "Filing Blocked"
+                : "Save Filing Record"}
             </Button>
           </DialogFooter>
         </DialogContent>

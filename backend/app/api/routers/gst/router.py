@@ -378,6 +378,27 @@ def create_gst_record(
         else:
             period_label = start_d.strftime("%b %Y")
 
+    due_date = payload.due_date
+    if not due_date and end_d:
+        due_year = end_d.year if end_d.month < 12 else end_d.year + 1
+        due_month = end_d.month + 1 if end_d.month < 12 else 1
+        if payload.gst_type == "GSTR-1":
+            due_day = 13 if (client_freq == "Quarterly" or is_quarterly_period) else 11
+        elif payload.gst_type == "GSTR-3B":
+            if client_freq == "Quarterly" or is_quarterly_period:
+                st_code = (client.gst_number or "")[:2]
+                cat1 = ["22", "23", "24", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "37"]
+                due_day = 22 if st_code in cat1 else 24
+            else:
+                due_day = 20
+        elif payload.gst_type == "GSTR-9":
+            due_year = end_d.year
+            due_month = 12
+            due_day = 31
+        else:
+            due_day = 20
+        due_date = date(due_year, due_month, due_day)
+
     record = GSTRecord(
         id=uuid.uuid4(),
         client_id=payload.client_id,
@@ -389,7 +410,7 @@ def create_gst_record(
         igst=igst,
         total_tax=total_tax,
         filing_status=payload.filing_status,
-        due_date=payload.due_date,
+        due_date=due_date,
         period_start=start_d,
         period_end=end_d,
         period_label=period_label,
