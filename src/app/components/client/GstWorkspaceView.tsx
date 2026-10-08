@@ -257,7 +257,10 @@ export function GstWorkspaceView({
     [effectiveDocs]
   );
   const postedCount = useMemo(
-    () => ledgerRecords.filter((r) => r.status === "posted").length,
+    () =>
+      ledgerRecords.filter(
+        (r) => r.status === "posted" && !r.is_reversed && r.status !== "reversed"
+      ).length,
     [ledgerRecords]
   );
   const filedCount = useMemo(

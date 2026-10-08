@@ -268,6 +268,7 @@ class AccountingDraftService:
         elif category == "debit_note":
             voucher_type = "journal"
             record_category = "debit_note"
+            client = getattr(doc, "client", None)
             if client and doc.vendor and (client.company_name.lower() in doc.vendor.lower() or doc.vendor.lower() in client.company_name.lower() or (doc.gstin and doc.gstin == client.gst_number)):
                 party_label = doc.customer or "Vendor"
             else:
