@@ -74,6 +74,9 @@ class UploadedDocument(Base):
 
     # ── Status & Meta ─────────────────────────────────────────
     status = Column(String(20), nullable=False, default="pending")     # pending | processed | verified | rejected
+    rejection_reason = Column(String(100), nullable=True)
+    irn = Column(String(100), nullable=True, index=True)
+    linked_document_id = Column(UUID(as_uuid=True), ForeignKey("uploaded_documents.id", ondelete="SET NULL"), nullable=True, index=True)
     uploaded_by = Column(String(255), nullable=True)
     metadata_ = Column("metadata", Text, nullable=True)                # JSON blob for extra fields
 

@@ -34,4 +34,9 @@ class GSTRecordResponse(BaseModel):
     total_tax: Decimal
     filing_status: str
     due_date: Optional[date] = None
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    period_label: Optional[str] = None
+    void_reason: Optional[str] = None
+    voided_at: Optional[datetime] = None
     created_at: datetime

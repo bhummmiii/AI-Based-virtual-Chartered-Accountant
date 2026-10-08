@@ -25,6 +25,11 @@ class GSTRecord(Base):
     total_tax = Column(Numeric(15, 2), nullable=False, default=0)
     filing_status = Column(String(20), nullable=False, default="pending")  # filed | pending | overdue | nil
     due_date = Column(Date, nullable=True)
+    period_start = Column(Date, nullable=True)
+    period_end = Column(Date, nullable=True)
+    period_label = Column(String(50), nullable=True)
+    void_reason = Column(String(500), nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # ── Relationship ──────────────────────────────

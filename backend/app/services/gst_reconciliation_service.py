@@ -4,6 +4,8 @@ Phase 7 — GSTR-1, GSTR-2B, GSTR-3B reconciliation against general ledger,
 automated discrepancy detection, and explainable CA review insights.
 """
 
+import os
+import re
 import uuid
 import logging
 from datetime import date, datetime
@@ -37,6 +39,21 @@ from app.schemas.gst_reconciliation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_file_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    candidates = [
+        path,
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), path),
+        os.path.join(os.getcwd(), path),
+        os.path.join(os.getcwd(), "backend", path),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return None
 
 
 class GstReconciliationService:
@@ -446,10 +463,18 @@ class GstReconciliationService:
 
             doc_g = (d.gstin or "").strip().upper()
             recipient_gstin = ""
+
+            # Check voucher header first (F1)
+            voucher_counterparty_gstin = getattr(je, "counterparty_gstin", None)
+            voucher_counterparty_name = getattr(je, "counterparty_name", None)
+            if voucher_counterparty_gstin and len(voucher_counterparty_gstin.strip()) == 15 and voucher_counterparty_gstin.strip().upper() != client_gstin:
+                recipient_gstin = voucher_counterparty_gstin.strip().upper()
+
             if meta_customer_gst and len(meta_customer_gst) == 15 and meta_customer_gst != client_gstin:
                 recipient_gstin = meta_customer_gst
             elif (
-                doc_g
+                not recipient_gstin
+                and doc_g
                 and len(doc_g) == 15
                 and doc_g != client_gstin
                 and doc_g != meta_supplier_gst
@@ -458,14 +483,100 @@ class GstReconciliationService:
             ):
                 recipient_gstin = doc_g
 
-            has_gstin = bool(recipient_gstin and len(recipient_gstin) == 15)
-
             # Customer name
             customer_party = d.customer or d.vendor or ""
-            if d.customer and "(From)" not in d.customer:
+            if voucher_counterparty_name:
+                customer_party = voucher_counterparty_name
+            elif d.customer and "(From)" not in d.customer:
                 customer_party = d.customer
             elif d.vendor and "(From)" not in d.vendor and d.vendor != "Entered Date":
                 customer_party = d.vendor
+
+            # F1: For notes, if recipient_gstin is still missing, resolve from note text or referenced invoice
+            if is_note and not recipient_gstin:
+                # 1. Fallback: inspect printed note text on disk for recipient GSTIN
+                pdf_full_p = _resolve_file_path(d.file_path)
+                if pdf_full_p:
+                    try:
+                        import pypdf
+                        reader = pypdf.PdfReader(pdf_full_p)
+                        full_txt = "\n".join(page.extract_text() or "" for page in reader.pages)
+                        recip_m = re.search(r"Recipient\s*(?:\(To\))?[\s\r\n]+([A-Za-z0-9 .,&\'\-]{3,50})[\s\S]*?GSTIN[:\s]*([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z])", full_txt, re.I)
+                        if recip_m:
+                            cand_name = recip_m.group(1).strip()
+                            cand_gstin = recip_m.group(2).strip().upper()
+                            if cand_gstin != client_gstin:
+                                recipient_gstin = cand_gstin
+                                if cand_name:
+                                    customer_party = cand_name
+                    except Exception:
+                        pass
+
+                # 2. Fallback: recipient GSTIN of referenced original invoice found among same client's documents
+                if not recipient_gstin:
+                    orig_inv = None
+                    if d.metadata_:
+                        try:
+                            import json
+                            meta_json = json.loads(d.metadata_) if isinstance(d.metadata_, str) else d.metadata_
+                            fields_dict = meta_json.get("fields", {}) if isinstance(meta_json, dict) else {}
+                            orig_inv = (
+                                fields_dict.get("original_invoice_number")
+                                or fields_dict.get("linked_invoice_number")
+                                or meta_json.get("original_invoice_number")
+                                or meta_json.get("linked_invoice_number")
+                            )
+                            if isinstance(orig_inv, dict):
+                                orig_inv = orig_inv.get("value")
+                        except Exception:
+                            pass
+                    if not orig_inv and pdf_full_p:
+                        try:
+                            import pypdf
+                            reader = pypdf.PdfReader(pdf_full_p)
+                            txt_sample = "\n".join(page.extract_text() or "" for page in reader.pages)
+                            ref_m = re.search(r"Against Invoice\s+([A-Za-z0-9\/\-_]+)", txt_sample, re.I)
+                            if ref_m:
+                                orig_inv = ref_m.group(1).strip()
+                        except Exception:
+                            pass
+
+                    if orig_inv:
+                        orig_doc = (
+                            db.query(UploadedDocument)
+                            .filter(
+                                UploadedDocument.client_id == d.client_id,
+                                UploadedDocument.invoice_number == orig_inv.strip(),
+                            )
+                            .first()
+                        )
+                        if orig_doc:
+                            cand_gstin = ""
+                            if orig_doc.metadata_:
+                                try:
+                                    import json
+                                    m_orig = json.loads(orig_doc.metadata_) if isinstance(orig_doc.metadata_, str) else orig_doc.metadata_
+                                    f_orig = m_orig.get("fields", {}) if isinstance(m_orig, dict) else {}
+                                    cand_gstin = (
+                                        f_orig.get("customer_gstin")
+                                        or f_orig.get("buyer_gstin")
+                                        or f_orig.get("recipient_gstin")
+                                        or ""
+                                    )
+                                    if isinstance(cand_gstin, dict):
+                                        cand_gstin = cand_gstin.get("value") or ""
+                                    cand_gstin = str(cand_gstin).strip().upper()
+                                except Exception:
+                                    pass
+                            if not cand_gstin and orig_doc.gstin and orig_doc.gstin.strip().upper() != client_gstin:
+                                cand_gstin = orig_doc.gstin.strip().upper()
+
+                            if cand_gstin and len(cand_gstin) == 15 and cand_gstin != client_gstin:
+                                recipient_gstin = cand_gstin
+                                if orig_doc.customer:
+                                    customer_party = orig_doc.customer
+
+            has_gstin = bool(recipient_gstin and len(recipient_gstin) == 15)
 
             row_item = GstReconciliationInvoiceItem(
                 document_id=d.id,

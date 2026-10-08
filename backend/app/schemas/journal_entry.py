@@ -59,6 +59,9 @@ class JournalEntryBase(BaseModel):
     reference_number: Optional[str] = None
     accounting_record_id: Optional[uuid.UUID] = None
     document_id: Optional[uuid.UUID] = None
+    counterparty_name: Optional[str] = None
+    counterparty_gstin: Optional[str] = None
+    voucher_template: Optional[str] = None
 
 
 class JournalEntryCreate(JournalEntryBase):

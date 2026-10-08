@@ -62,6 +62,9 @@ class JournalEntry(Base):
     is_reversed = Column(Boolean, nullable=False, default=False, server_default="false")
     reversal_entry_id = Column(UUID(as_uuid=True), ForeignKey("journal_entries.id", ondelete="SET NULL"), nullable=True)
     reversal_reason = Column(Text, nullable=True)
+    counterparty_name = Column(String(255), nullable=True)
+    counterparty_gstin = Column(String(20), nullable=True, index=True)
+    voucher_template = Column(String(50), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
