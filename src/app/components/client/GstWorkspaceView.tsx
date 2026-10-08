@@ -980,11 +980,36 @@ export function GstWorkspaceView({
                     <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-emerald-500" />
                     <div>
                       <p className="font-semibold text-emerald-600 dark:text-emerald-400">
-                        Section 16(2) Statutory Compliance — 100% Eligible ITC
+                        Section 16(2) &amp; Rule 37/37A Statutory Reconciliation
                       </p>
                       <p className="mt-0.5 text-muted-foreground">
                         All inward purchase invoices contain verified supplier GSTINs compliant with CGST Section 16(2).
-                        100% of inward tax (<strong className="text-foreground font-mono">{formatGstCurrency(eligibleItc)}</strong>) is claimable as Net Eligible Input Tax Credit in Table 4.
+                        {(() => {
+                          const availVal =
+                            Number(gstr3bData?.table_4_itc_available?.igst || 0) +
+                            Number(gstr3bData?.table_4_itc_available?.cgst || 0) +
+                            Number(gstr3bData?.table_4_itc_available?.sgst || 0) || eligibleItc;
+                          const revVal =
+                            Number(gstr3bData?.table_4_itc_reversed?.igst || 0) +
+                            Number(gstr3bData?.table_4_itc_reversed?.cgst || 0) +
+                            Number(gstr3bData?.table_4_itc_reversed?.sgst || 0);
+                          const netVal =
+                            Number(gstr3bData?.table_4_net_itc?.igst || 0) +
+                            Number(gstr3bData?.table_4_net_itc?.cgst || 0) +
+                            Number(gstr3bData?.table_4_net_itc?.sgst || 0) || eligibleItc;
+                          if (revVal > 0) {
+                            return (
+                              <span>
+                                {" "}ITC available <strong className="text-foreground font-mono">{formatGstCurrency(availVal)}</strong>, reversed <strong className="text-amber-500 font-mono">{formatGstCurrency(revVal)}</strong>, net <strong className="text-foreground font-mono">{formatGstCurrency(netVal)}</strong>.
+                              </span>
+                            );
+                          }
+                          return (
+                            <span>
+                              {" "}Net claimable ITC in Table 4 is <strong className="text-foreground font-mono">{formatGstCurrency(netVal)}</strong>.
+                            </span>
+                          );
+                        })()}
                       </p>
                     </div>
                   </div>
