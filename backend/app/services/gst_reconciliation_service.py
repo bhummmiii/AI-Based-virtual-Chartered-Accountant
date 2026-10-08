@@ -1573,6 +1573,30 @@ class GstReconciliationService:
                 continue
             if end_d and je.entry_date and je.entry_date > end_d:
                 continue
+
+            # F9: Exclude payment vouchers from commercial tax lines check
+            is_payment = (
+                je.voucher_template == "PAYMENT"
+                or (je.entry_type or "").lower() == "payment"
+            )
+            if is_payment:
+                # Add FUTURE_DATED_PAYMENT advisory alert (MEDIUM, non-blocking) if payment date > today
+                if je.entry_date and je.entry_date > date.today():
+                    discrepancies.append(GstDiscrepancyItem(
+                        discrepancy_id=f"DISC-FUTURE-PAY-{je.id}",
+                        rule_code="FUTURE_DATED_PAYMENT",
+                        severity="MEDIUM",
+                        title="Future-Dated Tax Payment Voucher",
+                        description=f"Payment voucher #{je.entry_number} is dated {je.entry_date}, which is after today's date ({date.today()}). Non-blocking advisory.",
+                        voucher_id=je.id,
+                        invoice_number=je.reference_number,
+                        party_name=je.counterparty_name or "GST Tax Challan",
+                        variance_amount=Decimal("0.00"),
+                        statutory_reference="Section 49 CGST Act (Payment of tax, interest, penalty and other amounts)",
+                        recommended_action="Verify voucher payment date against bank realization statement.",
+                    ))
+                continue
+
             doc = None
             if je.document_id:
                 doc = db.query(UploadedDocument).filter(UploadedDocument.id == je.document_id).first()
