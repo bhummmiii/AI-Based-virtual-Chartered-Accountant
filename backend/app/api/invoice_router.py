@@ -790,6 +790,18 @@ def update_document(
         doc.document_category = payload.document_category
     if payload.applies_to is not None:
         doc.applies_to = payload.applies_to.strip().lower()
+    if payload.invoice_number is not None:
+        doc.invoice_number = payload.invoice_number.strip() if payload.invoice_number else None
+    if payload.irn is not None:
+        doc.irn = payload.irn.strip() if payload.irn else None
+    if payload.rejection_reason is not None:
+        doc.rejection_reason = payload.rejection_reason.strip() if payload.rejection_reason else None
+    if payload.linked_document_id is not None:
+        doc.linked_document_id = payload.linked_document_id
+        linked_doc = db.query(UploadedDocument).filter(UploadedDocument.id == payload.linked_document_id).first()
+        if linked_doc:
+            existing_meta["linked_invoice_id"] = str(linked_doc.id)
+            existing_meta["linked_invoice_number"] = linked_doc.invoice_number or f"DOC-{str(linked_doc.id)[:8]}"
 
     existing_meta["fields"] = meta_fields
     doc.metadata_ = _json.dumps(existing_meta)

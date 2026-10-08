@@ -1613,15 +1613,49 @@ export function DocumentDetailModal({
   );
 
   const commercialInvoices = useMemo(() => {
-    return (allDocs || []).filter(
+    const isOutward =
+      doc?.document_category === "e_invoice" ||
+      doc?.document_category === "e_way_bill" ||
+      ["sales_records", "b2b_invoice", "b2c_invoice"].includes(doc?.document_category);
+
+    const targetCategories = isOutward
+      ? ["sales_records", "b2b_invoice", "b2c_invoice"]
+      : ["purchase_records"];
+
+    const currentDocNum = String(
+      doc?.invoice_number ||
+      doc?.metadata_?.linked_invoice_number ||
+      doc?.metadata?.linked_invoice_number ||
+      ""
+    ).trim().toUpperCase();
+
+    const currentAmt = Number(doc?.amount || doc?.total_amount || 0);
+
+    const filtered = (allDocs || []).filter(
       (d) =>
         d.id !== docId &&
         d.status !== "rejected" &&
-        ["sales_records", "purchase_records", "b2b_invoice", "b2c_invoice"].includes(
-          d.document_category
-        )
+        d.rejection_reason !== "DUPLICATE" &&
+        targetCategories.includes(d.document_category)
     );
-  }, [allDocs, docId]);
+
+    // Rank: matching number first, then amount difference, then date
+    return filtered.sort((a, b) => {
+      const aNum = String(a.invoice_number || "").trim().toUpperCase();
+      const bNum = String(b.invoice_number || "").trim().toUpperCase();
+      const aMatchesNum = currentDocNum && aNum === currentDocNum ? 1 : 0;
+      const bMatchesNum = currentDocNum && bNum === currentDocNum ? 1 : 0;
+      if (aMatchesNum !== bMatchesNum) return bMatchesNum - aMatchesNum;
+
+      const aDiff = Math.abs(Number(a.amount || a.total_amount || 0) - currentAmt);
+      const bDiff = Math.abs(Number(b.amount || b.total_amount || 0) - currentAmt);
+      if (aDiff !== bDiff) return aDiff - bDiff;
+
+      const aDate = a.invoice_date || a.created_at || "";
+      const bDate = b.invoice_date || b.created_at || "";
+      return bDate.localeCompare(aDate);
+    });
+  }, [allDocs, docId, doc]);
 
   const linkedInvoiceNumber = useMemo(() => {
     return (
@@ -2064,7 +2098,10 @@ export function DocumentDetailModal({
       const res = await fetch(`${BASE_URL}/invoices/document/${docId}`, {
         method: "PATCH",
         headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ metadata: updatedMeta }),
+        body: JSON.stringify({
+          linked_document_id: selectedInvoiceToLink,
+          metadata: updatedMeta,
+        }),
       });
       if (!res.ok) throw new Error("Failed to link document to invoice");
 
@@ -3211,11 +3248,12 @@ export function DocumentDetailModal({
                   {commercialInvoices.map((inv) => (
                     <SelectItem key={inv.id} value={inv.id} className="text-xs">
                       <span className="font-semibold font-mono">
-                        {inv.invoice_number || inv.file_name || `Doc #${inv.id.slice(0, 8)}`}
+                        #{inv.invoice_number || inv.file_name || `Doc #${inv.id.slice(0, 8)}`}
                       </span>
                       {" · "}
-                      <span className="capitalize">{inv.document_category?.replace(/_/g, " ")}</span>
-                      {inv.total_amount ? ` · ₹${Number(inv.total_amount).toLocaleString("en-IN")}` : ""}
+                      <span className="truncate max-w-[140px] inline-block align-bottom">{inv.customer || inv.vendor || inv.document_category?.replace(/_/g, " ")}</span>
+                      {" · "}
+                      <span className="font-medium font-mono">₹{Number(inv.amount || inv.total_amount || 0).toLocaleString("en-IN")}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

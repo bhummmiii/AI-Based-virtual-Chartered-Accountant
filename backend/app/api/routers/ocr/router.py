@@ -2817,7 +2817,54 @@ def _parse_credit_debit_note(text: str, *args, **kwargs) -> Tuple[Dict[str, Any]
 
 def _parse_e_invoice(t: str, *args, **kwargs) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     struc, tables = _norm_parser_args(t, args[0] if args else None, args[1] if len(args) > 1 else None)
-    return _parse_invoice(t, struc, tables)
+    core, meta = _parse_invoice(t, struc, tables)
+
+    # 1. Extract IRN (64-character hex string)
+    irn_match = re.search(r"IRN[:\s]+([0-9a-fA-F\s]+)", t, re.I)
+    irn = None
+    if irn_match:
+        cleaned_hex = re.sub(r"[^0-9a-fA-F]", "", irn_match.group(1))
+        if len(cleaned_hex) >= 64:
+            irn = cleaned_hex[:64].lower()
+    if not irn:
+        m_hex = re.search(r"\b([0-9a-fA-F]{64})\b", re.sub(r"[\r\n\s]+", "", t))
+        if m_hex:
+            irn = m_hex.group(1).lower()
+
+    if irn:
+        core["irn"] = _field(irn, "extracted")
+        meta["irn"] = _field(irn, "extracted")
+        meta["irn_hash"] = _field(irn, "extracted")
+
+    # 2. Extract Document No into invoice_number (Rule F5(1))
+    doc_no = struc.get("document_no") or struc.get("doc_no") or _find([
+        r"Document\s*No[:\s]*([A-Za-z0-9\/\-_]+)",
+        r"Doc\s*No[:\s]*([A-Za-z0-9\/\-_]+)",
+        r"(?:Document|Invoice|Doc)\s*Number[:\s]*([A-Za-z0-9\/\-_]+)",
+    ], t)
+    if doc_no:
+        core["invoice_number"] = _field(doc_no, "extracted")
+        meta["document_number"] = _field(doc_no, "extracted")
+        meta["invoice_number"] = _field(doc_no, "extracted")
+        meta["linked_invoice_number"] = _field(doc_no, "extracted")
+
+    # If invoice_number was set to the 64-char IRN, replace it with doc_no or clear
+    curr_inv = (core.get("invoice_number") or {}).get("value")
+    if curr_inv and len(str(curr_inv)) == 64 and irn and str(curr_inv).lower() == irn.lower():
+        if doc_no:
+            core["invoice_number"] = _field(doc_no, "extracted")
+        else:
+            core["invoice_number"] = _missing()
+
+    # 3. Ack No & Ack Date
+    ack_no = _find([r"Ack\s*No[:\s]*([0-9]+)"], t)
+    if ack_no:
+        meta["acknowledgement_number"] = _field(ack_no, "extracted")
+    ack_date = _find([r"Ack\s*Date[:\s]*([0-9]{2}[-/.][A-Za-z]{3}[-/.][0-9]{4}[^\n]*)"], t)
+    if ack_date:
+        meta["acknowledgement_date"] = _field(ack_date, "extracted")
+
+    return core, meta
 
 
 def _parse_e_way_bill(t: str, *args, **kwargs) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -4555,7 +4602,7 @@ def _dispatch_parser(category: str, raw_text: str, tables: Optional[list] = None
         "b2b_invoice": _parse_invoice,
         "b2c_invoice": _parse_invoice,
         "hsn_sac": _parse_hsn_sac,
-        "e_invoice": _parse_invoice,
+        "e_invoice": _parse_e_invoice,
         "e_way_bill": _parse_e_way_bill,
         "gst_challan": _parse_challan,
         "gst_return": _parse_gst_return,

@@ -109,6 +109,9 @@ class UploadedDocumentResponse(BaseModel):
 
     # ── Core Identifiers ────────────────────────────────────
     invoice_number: Optional[str] = None
+    irn: Optional[str] = None
+    linked_document_id: Optional[uuid.UUID] = None
+    rejection_reason: Optional[str] = None
     gstin: Optional[str] = None
     vendor: Optional[str] = None
     customer: Optional[str] = None
@@ -335,6 +338,9 @@ class UploadedDocumentListItem(BaseModel):
     document_category: str
     document_type: str
     invoice_number: Optional[str] = None
+    irn: Optional[str] = None
+    linked_document_id: Optional[uuid.UUID] = None
+    rejection_reason: Optional[str] = None
     vendor: Optional[str] = None
     customer: Optional[str] = None
     amount: Optional[Decimal] = None
@@ -356,4 +362,8 @@ class DocumentUpdateRequest(BaseModel):
     status: Optional[str] = None
     document_category: Optional[str] = None
     applies_to: Optional[str] = None
+    invoice_number: Optional[str] = None
+    irn: Optional[str] = None
+    linked_document_id: Optional[uuid.UUID] = None
+    rejection_reason: Optional[str] = None
 
