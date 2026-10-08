@@ -267,14 +267,41 @@ def create_gst_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    GstReconciliationService.verify_client_access(db, payload.client_id, current_user)
+    client = GstReconciliationService.verify_client_access(db, payload.client_id, current_user)
 
-    # 1. Reject duplicate filing for same client, period, and return type
+    # 1. Reject unselected period
+    period_str = (payload.gst_period or "").strip()
+    if not period_str or period_str.lower() in ("all", "all available", "all_available"):
+        raise BadRequestException(
+            detail="Filing Blocked: Please select a specific statutory return period before recording a filing."
+        )
+
+    # 2. Reject period not matching client's return frequency
+    client_freq = (client.return_frequency or "Monthly").strip()
+    is_quarterly_period = "Q" in period_str.upper()
+    if client_freq == "Quarterly" and not is_quarterly_period:
+        raise BadRequestException(
+            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency ({client_freq}). Quarterly clients must file for quarters (e.g., 2026-Q2)."
+        )
+    elif client_freq == "Monthly" and is_quarterly_period:
+        raise BadRequestException(
+            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency ({client_freq}). Monthly clients must file for months (e.g., 2026-09)."
+        )
+
+    # 3. Parse period dates and reject period that has not ended yet (period end >= today)
+    start_d, end_d = GstReconciliationService._parse_period_dates(period_str, None, None)
+    today = date.today()
+    if not end_d or end_d >= today:
+        raise BadRequestException(
+            detail=f"Filing Blocked: Period '{period_str}' has not ended yet (period ends on {end_d}, today is {today}). Filings can only be recorded after the period has closed."
+        )
+
+    # 4. Reject duplicate filing for same client, period, and return type
     existing = (
         db.query(GSTRecord)
         .filter(
             GSTRecord.client_id == payload.client_id,
-            GSTRecord.gst_period == payload.gst_period,
+            GSTRecord.gst_period == period_str,
             GSTRecord.gst_type == payload.gst_type,
             GSTRecord.filing_status != "voided",
         )
@@ -282,41 +309,36 @@ def create_gst_record(
     )
     if existing:
         raise BadRequestException(
-            detail=f"Filing record already exists for {payload.gst_type} period {payload.gst_period} (Status: {existing.filing_status}). Duplicate filing rejected."
+            detail=f"Filing record already exists for {payload.gst_type} period {period_str} (Status: {existing.filing_status}). Duplicate filing rejected."
         )
 
-    # 2. Derive figures from ledger if not provided or 0
-    start_d, end_d = GstReconciliationService._parse_period_dates(payload.gst_period, None, None)
-    taxable_amount = payload.taxable_amount
-    cgst = payload.cgst
-    sgst = payload.sgst
-    igst = payload.igst
-    total_tax = payload.total_tax
+    # 5. Server-Authoritative: ignore client-supplied amounts and compute figures directly from server ledger
+    if payload.gst_type == "GSTR-1":
+        recon = GstReconciliationService.reconcile_gstr1(
+            db, payload.client_id, current_user, period=period_str
+        )
+        taxable_amount = recon.total_outward_taxable
+        cgst = recon.total_outward_cgst
+        sgst = recon.total_outward_sgst
+        igst = recon.total_outward_igst
+        total_tax = recon.total_outward_tax
+    elif payload.gst_type == "GSTR-3B":
+        g3b = GstReconciliationService.generate_gstr3b(
+            db, payload.client_id, current_user, period=period_str
+        )
+        taxable_amount = g3b.table_3_1_outward.taxable_value
+        cgst = g3b.cash_payable_cgst
+        sgst = g3b.cash_payable_sgst
+        igst = g3b.cash_payable_igst
+        total_tax = g3b.tax_payable_in_cash
+    else:
+        taxable_amount = Decimal("0.00")
+        cgst = Decimal("0.00")
+        sgst = Decimal("0.00")
+        igst = Decimal("0.00")
+        total_tax = Decimal("0.00")
 
-    if taxable_amount is None or taxable_amount == Decimal("0.00"):
-        if payload.gst_type == "GSTR-1":
-            recon = GstReconciliationService.reconcile_gstr1(
-                db, payload.client_id, current_user, period=payload.gst_period
-            )
-            taxable_amount = recon.total_outward_taxable
-            cgst = recon.total_outward_cgst
-            sgst = recon.total_outward_sgst
-            igst = recon.total_outward_igst
-            total_tax = recon.total_outward_tax
-        elif payload.gst_type == "GSTR-3B":
-            g3b = GstReconciliationService.generate_gstr3b(
-                db, payload.client_id, current_user, period=payload.gst_period
-            )
-            taxable_amount = g3b.table_3_1_outward.taxable_value
-            cgst = g3b.table_3_1_outward.cgst
-            sgst = g3b.table_3_1_outward.sgst
-            igst = g3b.table_3_1_outward.igst
-            total_tax = g3b.tax_payable_in_cash
-
-    if total_tax is None:
-        total_tax = cgst + sgst + igst
-
-    # 2b. Statutory Validation Gate:
+    # 6. Statutory Validation Gate:
     # A. Tax liability and taxable turnover cannot be negative under statutory GST rules
     if (total_tax is not None and total_tax < Decimal("0.00")) or (taxable_amount is not None and taxable_amount < Decimal("0.00")):
         raise BadRequestException(
@@ -329,17 +351,37 @@ def create_gst_record(
             db=db,
             client_id=payload.client_id,
             user=current_user,
-            period=payload.gst_period,
+            period=period_str,
         )
         if discrepancies.high_count > 0:
             raise BadRequestException(
-                detail=f"Statutory Filing Blocked: {discrepancies.high_count} unresolved high-risk discrepancy(ies) detected for period {payload.gst_period}. Resolve discrepancies before recording return filing."
+                detail=f"Statutory Filing Blocked: {discrepancies.high_count} unresolved high-risk discrepancy(ies) detected for period {period_str}. Resolve discrepancies before recording return filing."
             )
+
+    # 7. Compute period_label for quarterly / monthly clients
+    period_label = None
+    if start_d and end_d:
+        if client_freq == "Quarterly" or is_quarterly_period:
+            if start_d.month in [4, 5, 6]:
+                q_str = "Q1"
+                fy_str = f"FY {start_d.year}-{str(start_d.year+1)[-2:]}"
+            elif start_d.month in [7, 8, 9]:
+                q_str = "Q2"
+                fy_str = f"FY {start_d.year}-{str(start_d.year+1)[-2:]}"
+            elif start_d.month in [10, 11, 12]:
+                q_str = "Q3"
+                fy_str = f"FY {start_d.year}-{str(start_d.year+1)[-2:]}"
+            else:
+                q_str = "Q4"
+                fy_str = f"FY {start_d.year-1}-{str(start_d.year)[-2:]}"
+            period_label = f"{q_str} {fy_str}"
+        else:
+            period_label = start_d.strftime("%b %Y")
 
     record = GSTRecord(
         id=uuid.uuid4(),
         client_id=payload.client_id,
-        gst_period=payload.gst_period,
+        gst_period=period_str,
         gst_type=payload.gst_type,
         taxable_amount=taxable_amount,
         cgst=cgst,
@@ -348,6 +390,9 @@ def create_gst_record(
         total_tax=total_tax,
         filing_status=payload.filing_status,
         due_date=payload.due_date,
+        period_start=start_d,
+        period_end=end_d,
+        period_label=period_label,
     )
     db.add(record)
 

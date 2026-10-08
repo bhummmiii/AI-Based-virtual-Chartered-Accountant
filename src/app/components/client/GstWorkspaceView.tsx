@@ -261,7 +261,7 @@ export function GstWorkspaceView({
     [ledgerRecords]
   );
   const filedCount = useMemo(
-    () => filingRecords.filter((r) => r.filing_status === "filed").length,
+    () => filingRecords.filter((r) => r.filing_status === "filed" && r.filing_status !== "voided" && !r.void_reason).length,
     [filingRecords]
   );
 
@@ -1530,31 +1530,40 @@ export function GstWorkspaceView({
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filingRecords.map((r: any, idx: number) => (
-                        <TableRow key={idx} className="hover:bg-muted/20">
-                          <TableCell className="font-semibold font-mono text-foreground">
-                            {r.gst_period}
-                          </TableCell>
-                          <TableCell className="font-mono text-primary font-medium">
-                            {r.gst_type}
-                          </TableCell>
-                          <TableCell className="font-mono text-muted-foreground">
-                            {r.due_date || "—"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono">
-                            {formatGstCurrency(Number(r.taxable_amount || 0))}
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-semibold text-foreground">
-                            {formatGstCurrency(Number(r.total_tax || 0))}
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge value={r.filing_status === "filed" ? "Filed" : "Pending"} />
-                          </TableCell>
-                          <TableCell className="font-mono text-muted-foreground text-[11px]">
-                            {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      filingRecords.map((r: any, idx: number) => {
+                        const isVoided = r.filing_status === "voided" || Boolean(r.void_reason);
+                        return (
+                          <TableRow key={idx} className={cn("hover:bg-muted/20", isVoided && "opacity-60 bg-muted/20")}>
+                            <TableCell className="font-semibold font-mono text-foreground">
+                              {r.period_label || r.gst_period}
+                            </TableCell>
+                            <TableCell className="font-mono text-primary font-medium">
+                              {r.gst_type}
+                            </TableCell>
+                            <TableCell className="font-mono text-muted-foreground">
+                              {r.due_date || "—"}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">
+                              {formatGstCurrency(Number(r.taxable_amount || 0))}
+                            </TableCell>
+                            <TableCell className="text-right font-mono font-semibold text-foreground">
+                              {formatGstCurrency(Number(r.total_tax || 0))}
+                            </TableCell>
+                            <TableCell>
+                              {isVoided ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-muted text-muted-foreground border border-border" title={r.void_reason || "Voided"}>
+                                  Voided
+                                </span>
+                              ) : (
+                                <StatusBadge value={r.filing_status === "filed" ? "Filed" : "Pending"} />
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-muted-foreground text-[11px]">
+                              {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
