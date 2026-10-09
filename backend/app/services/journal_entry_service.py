@@ -103,7 +103,7 @@ class JournalEntryService:
         - Mathematical balance: Total Debit == Total Credit.
         - Duplicate prevention: cannot create duplicate journal for same accounting_record_id.
         """
-        cls.verify_client_access(db, client_id, user)
+        client = cls.verify_client_access(db, client_id, user)
 
         if payload.client_id != client_id:
             raise BadRequestException(detail="Payload client_id does not match the route client_id")

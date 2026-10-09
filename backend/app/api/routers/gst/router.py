@@ -409,7 +409,13 @@ def create_gst_record(
 
     # 7. Statutory Validation Gate:
     # A. Tax liability and taxable turnover cannot be negative under statutory GST rules
-    if (total_tax is not None and total_tax < Decimal("0.00")) or (taxable_amount is not None and taxable_amount < Decimal("0.00")):
+    payload_tot = payload.total_tax if payload.total_tax is not None else (payload.cgst + payload.sgst + payload.igst)
+    if (
+        (payload_tot is not None and payload_tot < Decimal("0.00"))
+        or (payload.taxable_amount is not None and payload.taxable_amount < Decimal("0.00"))
+        or (total_tax is not None and total_tax < Decimal("0.00"))
+        or (taxable_amount is not None and taxable_amount < Decimal("0.00"))
+    ):
         raise BadRequestException(
             detail="Statutory Filing Blocked: Total statutory tax liability and taxable amount cannot be negative."
         )

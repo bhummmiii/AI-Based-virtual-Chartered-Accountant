@@ -85,6 +85,7 @@ def setup_d9(db_session):
         gst_number="27AAACV9999V1Z1",
         state="Maharashtra",
         status="active",
+        return_frequency="Monthly",
     )
     db_session.add(client)
     db_session.flush()
