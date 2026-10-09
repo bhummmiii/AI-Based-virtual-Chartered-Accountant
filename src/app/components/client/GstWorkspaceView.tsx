@@ -225,13 +225,16 @@ export function GstWorkspaceView({
   const [discrepancyData, setDiscrepancyData] = useState<any>(null);
   const [filingRecords, setFilingRecords] = useState<any[]>([]);
 
-  // Record filing modal state
+  // Record filing modal state (G3)
   const [recordModalOpen, setRecordModalOpen] = useState(false);
-  const [filingPeriod, setFilingPeriod] = useState("2026-09");
+  const [filingOptions, setFilingOptions] = useState<any>(null);
+  const [filingPreview, setFilingPreview] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [filingPeriod, setFilingPeriod] = useState("");
   const [filingForm, setFilingForm] = useState("GSTR-3B");
   const [filingTaxable, setFilingTaxable] = useState("");
   const [filingTax, setFilingTax] = useState("");
-  const [filingDueDate, setFilingDueDate] = useState("2026-10-20");
+  const [filingDueDate, setFilingDueDate] = useState("");
   const [submittingFiling, setSubmittingFiling] = useState(false);
 
   // ── Fetch all GST reconciliation data ──────────────────────────
@@ -383,29 +386,81 @@ export function GstWorkspaceView({
     return periodStr;
   };
 
-  // Open modal with prefilled statutory values
-  const openFilingModal = () => {
-    const isPeriodSelected = selectedPeriod && selectedPeriod !== "all";
-    const targetPeriod = isPeriodSelected ? selectedPeriod : "";
-    setFilingPeriod(targetPeriod);
-    setFilingForm("GSTR-3B");
-    setFilingTaxable(outwardTaxable.toFixed(2));
-    setFilingTax(netCashPayable.toFixed(2));
-    setFilingDueDate(targetPeriod ? computeStatutoryDueDate(targetPeriod, "GSTR-3B", returnFrequency) : "");
+  const fetchPreviewFor = async (periodKey: string, formCode: string) => {
+    if (!clientId || !periodKey || periodKey === "all") {
+      setFilingPreview(null);
+      return;
+    }
+    setLoadingPreview(true);
+    try {
+      const token = localStorage.getItem("ca_token") || localStorage.getItem("access_token");
+      const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${base}/gst/filing-preview?client_id=${clientId}&period=${periodKey}&form=${formCode}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data) {
+          setFilingPreview(json.data);
+          setFilingDueDate(json.data.due_date);
+          setFilingTaxable(Number(json.data.taxable_value).toFixed(2));
+          setFilingTax(Number(json.data.total_cash_payable).toFixed(2));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch filing preview:", err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  // Open modal with prefilled statutory values from backend filing-options (G3)
+  const openFilingModal = async () => {
+    if (!clientId) return;
     setRecordModalOpen(true);
+    setLoadingPreview(true);
+    try {
+      const token = localStorage.getItem("ca_token") || localStorage.getItem("access_token");
+      const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${base}/gst/filing-options?client_id=${clientId}`, { headers });
+      if (res.ok) {
+        const json = await res.json();
+        const opts = json.data;
+        setFilingOptions(opts);
+
+        // Preselect period: if page period is a valid eligible period in options, use it;
+        // otherwise preselect default_period from filing-options.
+        const isEligible = opts?.periods?.some((p: any) => p.key === selectedPeriod && p.is_selectable);
+        const targetPeriod = (selectedPeriod && selectedPeriod !== "all" && isEligible)
+          ? selectedPeriod
+          : (opts?.default_period || opts?.periods?.find((p: any) => p.is_selectable)?.key || "");
+
+        const initialForm = opts?.return_forms?.[0]?.code || "GSTR-3B";
+        setFilingPeriod(targetPeriod);
+        setFilingForm(initialForm);
+
+        if (targetPeriod) {
+          await fetchPreviewFor(targetPeriod, initialForm);
+        } else {
+          setFilingPreview(null);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load filing options:", err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handlePeriodChange = (newPeriod: string) => {
+    setFilingPeriod(newPeriod);
+    fetchPreviewFor(newPeriod, filingForm);
   };
 
   const handleFormChange = (newForm: string) => {
     setFilingForm(newForm);
-    if (newForm === "GSTR-1") {
-      setFilingTaxable(outwardTaxable.toFixed(2));
-      setFilingTax(outwardTax.toFixed(2));
-    } else {
-      setFilingTaxable(outwardTaxable.toFixed(2));
-      setFilingTax(netCashPayable.toFixed(2));
-    }
     if (filingPeriod && filingPeriod !== "all") {
-      setFilingDueDate(computeStatutoryDueDate(filingPeriod, newForm, returnFrequency));
+      fetchPreviewFor(filingPeriod, newForm);
     }
   };
 
@@ -416,9 +471,12 @@ export function GstWorkspaceView({
       toast.error("Period required", { description: "Select a specific tax period to record a filing." });
       return;
     }
-    if (isFilingBlocked) {
+    const hasBlockers = (filingPreview?.blockers && filingPreview.blockers.length > 0) || isFilingBlocked;
+    if (hasBlockers) {
       toast.error("Statutory filing blocked", {
-        description: highRiskCount > 0
+        description: filingPreview?.blockers?.length
+          ? filingPreview.blockers.map((b: any) => b.message).join(" ")
+          : highRiskCount > 0
           ? `${highRiskCount} unresolved high-risk discrepancy(ies) must be resolved first.`
           : "Outward tax liability cannot be negative.",
       });
@@ -429,18 +487,18 @@ export function GstWorkspaceView({
     const base = (import.meta.env.VITE_API_BASE_URL as string) ?? "http://localhost:8000/api/v1";
 
     try {
-      const taxableNum = parseFloat(filingTaxable) || (gstr3bData?.table_3_1_outward?.taxable_value ? parseFloat(gstr3bData.table_3_1_outward.taxable_value) : 0);
-      const taxNum = parseFloat(filingTax) || (gstr3bData?.tax_payable_in_cash ? parseFloat(gstr3bData.tax_payable_in_cash) : 0);
+      const taxableNum = filingPreview?.taxable_value != null ? Number(filingPreview.taxable_value) : (parseFloat(filingTaxable) || (gstr3bData?.table_3_1_outward?.taxable_value ? parseFloat(gstr3bData.table_3_1_outward.taxable_value) : 0));
+      const taxNum = filingPreview?.total_cash_payable != null ? Number(filingPreview.total_cash_payable) : (parseFloat(filingTax) || (gstr3bData?.tax_payable_in_cash ? parseFloat(gstr3bData.tax_payable_in_cash) : 0));
 
       const is3b = filingForm === "GSTR-3B";
       const cgstVal = is3b
-        ? Number(gstr3bData?.cash_payable_cgst ?? 0)
+        ? Number(filingPreview?.cash_payable_cgst ?? gstr3bData?.cash_payable_cgst ?? 0)
         : taxNum / 2;
       const sgstVal = is3b
-        ? Number(gstr3bData?.cash_payable_sgst ?? 0)
+        ? Number(filingPreview?.cash_payable_sgst ?? gstr3bData?.cash_payable_sgst ?? 0)
         : taxNum / 2;
       const igstVal = is3b
-        ? Number(gstr3bData?.cash_payable_igst ?? 0)
+        ? Number(filingPreview?.cash_payable_igst ?? gstr3bData?.cash_payable_igst ?? 0)
         : 0;
 
       const payload = {
@@ -451,9 +509,9 @@ export function GstWorkspaceView({
         cgst: cgstVal,
         sgst: sgstVal,
         igst: igstVal,
-        total_tax: is3b ? Number(gstr3bData?.tax_payable_in_cash ?? taxNum) : taxNum,
+        total_tax: is3b ? Number(filingPreview?.total_cash_payable ?? gstr3bData?.tax_payable_in_cash ?? taxNum) : taxNum,
         filing_status: "filed",
-        due_date: filingDueDate,
+        due_date: filingPreview?.due_date || filingDueDate,
       };
 
       const res = await fetch(`${base}/gst/records`, {
@@ -1973,42 +2031,76 @@ export function GstWorkspaceView({
             </div>
           )}
 
-          {/* Statutory Blocking Alert Banner */}
-          {highRiskCount > 0 && (
+          {/* Statutory Blocking Alert Banner from Preview Blockers (G3) */}
+          {filingPreview?.blockers && filingPreview.blockers.length > 0 ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
               <AlertTriangle className="size-4 shrink-0 mt-0.5" />
               <div>
                 <p className="font-semibold text-xs">Statutory Filing Blocked</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
-                  {highRiskCount} unresolved high-risk discrepancy(ies) detected for this period. Resolve all discrepancies in the Discrepancies tab before recording statutory return filing.
-                </p>
+                <div className="mt-0.5 space-y-1">
+                  {filingPreview.blockers.map((b: any) => (
+                    <p key={b.code} className="text-[11px] leading-relaxed opacity-90">
+                      {b.message}
+                    </p>
+                  ))}
+                </div>
               </div>
             </div>
-          )}
-          {outwardTax < 0 && (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
-              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-xs">Negative Tax Liability Blocked</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
-                  Outward tax liability is negative (₹{outwardTax.toFixed(2)}). Under statutory GST rules, return filings cannot be submitted with negative liability.
-                </p>
-              </div>
-            </div>
+          ) : (
+            <>
+              {highRiskCount > 0 && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-xs">Statutory Filing Blocked</p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                      {highRiskCount} unresolved high-risk discrepancy(ies) detected for this period. Resolve all discrepancies in the Discrepancies tab before recording statutory return filing.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {outwardTax < 0 && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-destructive text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-xs">Negative Tax Liability Blocked</p>
+                    <p className="mt-0.5 text-[11px] leading-relaxed opacity-90">
+                      Outward tax liability is negative (₹{outwardTax.toFixed(2)}). Under statutory GST rules, return filings cannot be submitted with negative liability.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <div className="grid gap-3 py-2 text-xs">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Filing Period</Label>
-                <Input
-                  className="h-8 text-xs font-mono bg-muted/30 cursor-not-allowed"
-                  value={filingPeriod && filingPeriod !== "all" ? formatPeriodDisplay(filingPeriod, returnFrequency) : "Select a period to record a filing"}
-                  readOnly
-                  placeholder="Select a period to record a filing"
-                />
+                <Select value={filingPeriod} onValueChange={handlePeriodChange}>
+                  <SelectTrigger className="h-8 text-xs font-mono">
+                    <SelectValue placeholder="Select a period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filingOptions?.periods && filingOptions.periods.length > 0 ? (
+                      filingOptions.periods.map((p: any) => (
+                        <SelectItem key={p.key} value={p.key} disabled={!p.is_selectable}>
+                          {p.label}{p.status === "filed" ? " (Filed)" : p.is_nil ? " (Nil return)" : ""}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value={filingPeriod || "none"} disabled>
+                        {filingPeriod ? formatPeriodDisplay(filingPeriod, returnFrequency) : "Select a period"}
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
                 <p className="text-[10px] text-muted-foreground">
-                  {filingPeriod && filingPeriod !== "all" ? "Locked to selected period" : "Period selection required"}
+                  {filingPreview?.is_nil_return
+                    ? "Nil return (no posted transactions)"
+                    : filingPeriod && filingPeriod !== "all"
+                    ? "Statutory tax period"
+                    : "Period selection required"}
                 </p>
               </div>
               <div className="space-y-1">
@@ -2018,12 +2110,21 @@ export function GstWorkspaceView({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="GSTR-3B">GSTR-3B (Monthly/Quarterly Summary)</SelectItem>
-                    <SelectItem value="GSTR-1">GSTR-1 (Outward Supplies)</SelectItem>
-                    <SelectItem value="GSTR-9">GSTR-9 (Annual Return)</SelectItem>
+                    {filingOptions?.return_forms && filingOptions.return_forms.length > 0 ? (
+                      filingOptions.return_forms.map((f: any) => (
+                        <SelectItem key={f.code} value={f.code}>
+                          {f.label}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="GSTR-3B">GSTR-3B ({displayFrequency || "Monthly"})</SelectItem>
+                        <SelectItem value="GSTR-1">GSTR-1 ({displayFrequency || "Monthly"})</SelectItem>
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
-                <p className="text-[10px] text-muted-foreground">{displayFrequency || "Configured"} filing profile</p>
+                <p className="text-[10px] text-muted-foreground">{displayFrequency ? `${displayFrequency} filing profile` : "Configured filing profile"}</p>
               </div>
             </div>
 
@@ -2033,7 +2134,7 @@ export function GstWorkspaceView({
                 <Input
                   type="text"
                   className="h-8 text-xs font-mono bg-muted/30 font-semibold cursor-not-allowed"
-                  value={filingTaxable ? formatGstCurrency(parseFloat(filingTaxable)) : "₹0.00"}
+                  value={filingPreview?.taxable_value != null ? formatGstCurrency(Number(filingPreview.taxable_value)) : (filingTaxable ? formatGstCurrency(parseFloat(filingTaxable)) : "₹0.00")}
                   readOnly
                 />
                 <p className="text-[10px] text-muted-foreground">Derived from posted ledger lines</p>
@@ -2043,7 +2144,7 @@ export function GstWorkspaceView({
                 <Input
                   type="text"
                   className="h-8 text-xs font-mono bg-muted/30 font-semibold text-primary cursor-not-allowed"
-                  value={filingTax ? formatGstCurrency(parseFloat(filingTax)) : "₹0.00"}
+                  value={filingPreview?.total_cash_payable != null ? formatGstCurrency(Number(filingPreview.total_cash_payable)) : (filingTax ? formatGstCurrency(parseFloat(filingTax)) : "₹0.00")}
                   readOnly
                 />
                 <p className="text-[10px] text-muted-foreground">Derived statutory liability</p>
@@ -2052,9 +2153,18 @@ export function GstWorkspaceView({
 
             {filingForm === "GSTR-3B" && (
               <div className="rounded border border-amber-500/20 bg-amber-500/5 p-2 font-mono text-[11px] grid grid-cols-3 gap-2">
-                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash IGST</span><strong className="text-amber-500">{formatGstCurrency(gstr3bData?.cash_payable_igst ?? 0)}</strong></div>
-                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash CGST</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_cgst ?? 0)}</strong></div>
-                <div><span className="text-muted-foreground block text-[9px] uppercase">Cash SGST</span><strong>{formatGstCurrency(gstr3bData?.cash_payable_sgst ?? 0)}</strong></div>
+                <div>
+                  <span className="text-muted-foreground block text-[9px] uppercase">Cash IGST</span>
+                  <strong className="text-amber-500">{formatGstCurrency(Number(filingPreview?.cash_payable_igst ?? gstr3bData?.cash_payable_igst ?? 0))}</strong>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[9px] uppercase">Cash CGST</span>
+                  <strong>{formatGstCurrency(Number(filingPreview?.cash_payable_cgst ?? gstr3bData?.cash_payable_cgst ?? 0))}</strong>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[9px] uppercase">Cash SGST</span>
+                  <strong>{formatGstCurrency(Number(filingPreview?.cash_payable_sgst ?? gstr3bData?.cash_payable_sgst ?? 0))}</strong>
+                </div>
               </div>
             )}
 
@@ -2063,7 +2173,7 @@ export function GstWorkspaceView({
               <Input
                 type="date"
                 className="h-8 text-xs font-mono bg-muted/30 cursor-not-allowed"
-                value={filingDueDate}
+                value={filingPreview?.due_date || filingDueDate}
                 readOnly
               />
               <p className="text-[10px] text-muted-foreground">Computed by GST rules for {displayFrequency || "Configured"} {filingForm}</p>
@@ -2077,14 +2187,16 @@ export function GstWorkspaceView({
             <Button
               size="sm"
               onClick={handleRecordFiling}
-              disabled={submittingFiling || isFilingBlocked || !filingPeriod || filingPeriod === "all"}
-              className={(isFilingBlocked || !filingPeriod || filingPeriod === "all") ? "opacity-50 cursor-not-allowed" : ""}
+              disabled={submittingFiling || loadingPreview || !filingPeriod || filingPeriod === "all" || (filingPreview?.blockers && filingPreview.blockers.length > 0)}
+              className={(!filingPeriod || filingPeriod === "all" || (filingPreview?.blockers && filingPreview.blockers.length > 0)) ? "opacity-50 cursor-not-allowed" : ""}
             >
               {submittingFiling
                 ? "Recording…"
+                : loadingPreview
+                ? "Loading…"
                 : !filingPeriod || filingPeriod === "all"
                 ? "Select a Period"
-                : isFilingBlocked
+                : (filingPreview?.blockers && filingPreview.blockers.length > 0)
                 ? "Filing Blocked"
                 : "Save Filing Record"}
             </Button>
