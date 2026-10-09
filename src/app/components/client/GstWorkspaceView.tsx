@@ -1605,10 +1605,10 @@ export function GstWorkspaceView({
                               variant={isHigh ? "destructive" : "outline"}
                               className={cn(
                                 "text-[10px] font-mono uppercase font-semibold",
-                                !isHigh && "border-amber-500/30 bg-amber-500/10 text-amber-500"
+                                !isHigh && (d.severity === "INFO" ? "border-blue-500/30 bg-blue-500/10 text-blue-500" : "border-amber-500/30 bg-amber-500/10 text-amber-500")
                               )}
                             >
-                              {d.severity} RISK
+                              {d.severity === "INFO" ? "INFO" : `${d.severity} RISK`}
                             </Badge>
                             <span className="font-mono text-xs font-semibold text-foreground">
                               {d.rule_code}

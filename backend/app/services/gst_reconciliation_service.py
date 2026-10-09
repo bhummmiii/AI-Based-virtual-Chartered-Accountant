@@ -1517,19 +1517,41 @@ class GstReconciliationService:
                         elif dup_tot > Decimal("0.00"):
                             dup_tax = (dup_tot * Decimal("18") / Decimal("118")).quantize(Decimal("0.01"))
 
-                    discrepancies.append(GstDiscrepancyItem(
-                        discrepancy_id=f"DISC-DUP-{dup_doc.id}",
-                        rule_code="DUPLICATE_INVOICE",
-                        severity="HIGH",
-                        title="Duplicate Invoice Detected",
-                        description=f"Invoice #{inv_num} for GSTIN {gstin_key} already exists (Document #{orig_doc.id}).",
-                        document_id=dup_doc.id,
-                        invoice_number=dup_doc.invoice_number,
-                        party_name=party_name,
-                        variance_amount=dup_tax,
-                        statutory_reference="Rule 48 CGST Rules (Manner of issuing invoice)",
-                        recommended_action="Inspect duplicate upload and delete/void duplicate document to prevent double counting.",
-                    ))
+                    is_rejected_dup = (
+                        getattr(dup_doc, "status", "") == "rejected"
+                        or getattr(dup_doc, "rejection_reason", "") in ("DUPLICATE", "duplicate")
+                        or getattr(orig_doc, "status", "") == "rejected"
+                        or getattr(orig_doc, "rejection_reason", "") in ("DUPLICATE", "duplicate")
+                    )
+
+                    if is_rejected_dup:
+                        discrepancies.append(GstDiscrepancyItem(
+                            discrepancy_id=f"DISC-DUP-{dup_doc.id}",
+                            rule_code="DUPLICATE_REJECTED",
+                            severity="INFO",
+                            title="Rejected Duplicate Document",
+                            description=f"Rejected duplicate {dup_doc.invoice_number or inv_num} is excluded from all figures - you may delete it",
+                            document_id=dup_doc.id,
+                            invoice_number=dup_doc.invoice_number,
+                            party_name=party_name,
+                            variance_amount=Decimal("0.00"),
+                            statutory_reference="Rule 48 CGST Rules (Manner of issuing invoice)",
+                            recommended_action="Rejected duplicate is excluded from all figures - you may delete it.",
+                        ))
+                    else:
+                        discrepancies.append(GstDiscrepancyItem(
+                            discrepancy_id=f"DISC-DUP-{dup_doc.id}",
+                            rule_code="DUPLICATE_INVOICE",
+                            severity="HIGH",
+                            title="Duplicate Invoice Detected",
+                            description=f"Invoice #{inv_num} for GSTIN {gstin_key} already exists (Document #{orig_doc.id}).",
+                            document_id=dup_doc.id,
+                            invoice_number=dup_doc.invoice_number,
+                            party_name=party_name,
+                            variance_amount=dup_tax,
+                            statutory_reference="Rule 48 CGST Rules (Manner of issuing invoice)",
+                            recommended_action="Inspect duplicate upload and delete/void duplicate document to prevent double counting.",
+                        ))
                 else:
                     seen_invoices[key] = d
 
