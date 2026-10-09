@@ -665,6 +665,21 @@ export function VoucherDetailModal({
                 </p>
               </div>
             </div>
+            {voucher.taxBreakdown.length > 0 && (
+              <div className="p-2 rounded bg-background border border-border/40 mt-1.5">
+                <p className="text-[10px] text-muted-foreground uppercase font-medium">Tax paid - CGST/SGST/IGST</p>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {voucher.taxBreakdown.map((t, i) => (
+                    <span
+                      key={i}
+                      className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20"
+                    >
+                      {t.head}: {t.formatted}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

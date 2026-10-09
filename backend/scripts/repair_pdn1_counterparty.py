@@ -63,6 +63,26 @@ def repair_pdn_for_client(db, client: Client, apply: bool = False) -> bool:
     has_reversal = any((je.entry_number or "").startswith("REV-") for je in all_jes)
     replacement = next((je for je in all_jes if not je.is_reversed and not (je.entry_number or "").startswith("REV-") and any(l.party_gstin == "33AABCT1111E1Z6" for l in je.lines)), None)
     if has_reversal and replacement:
+        # Check if AccountingRecord description also needs the party label aligned
+        acc_rec = db.query(AccountingRecord).filter(
+            AccountingRecord.document_id == pdn_doc.id,
+            AccountingRecord.client_id == client.id,
+        ).first()
+        if acc_rec and "Party: TN Raw Materials Ltd" not in (acc_rec.description or ""):
+            if not apply:
+                print("  [DRY-RUN] Will update AccountingRecord description to display Party: TN Raw Materials Ltd.")
+                return True
+            desc = acc_rec.description or ""
+            if "Party: ABC Traders Pvt Ltd" in desc:
+                acc_rec.description = desc.replace("Party: ABC Traders Pvt Ltd", "Party: TN Raw Materials Ltd")
+            elif "Party:" in desc:
+                import re
+                acc_rec.description = re.sub(r"Party:\s*[^|]+", "Party: TN Raw Materials Ltd", desc)
+            else:
+                acc_rec.description = f"{desc} | Party: TN Raw Materials Ltd"
+            db.commit()
+            print("  Updated AccountingRecord description to Party: TN Raw Materials Ltd.")
+            return True
         print(f"  [IDEMPOTENT] PDN voucher is already correctly repaired with TN Raw Materials Ltd (33AABCT1111E1Z6) (Voucher #{replacement.entry_number}).")
         return False
 
