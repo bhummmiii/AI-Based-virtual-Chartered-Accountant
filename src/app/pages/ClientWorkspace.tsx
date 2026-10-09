@@ -765,7 +765,18 @@ export function ClientWorkspace() {
             clientCode={client?.id ?? clientId ?? ""}
             clientName={client?.company ?? ""}
             clientGstin={client?.gstin ?? ""}
-            returnFrequency={client?.clientType ?? "Monthly"}
+            returnFrequency={
+              overviewData?.filing_profile?.frequency
+                ? (overviewData.filing_profile.frequency === "quarterly" ? "Quarterly" : "Monthly")
+                : client?.filing_profile?.frequency
+                ? (client.filing_profile.frequency === "quarterly" ? "Quarterly" : "Monthly")
+                : client?.clientType
+                ? client.clientType
+                : client?.return_frequency
+                ? (client.return_frequency.toLowerCase().startsWith("q") ? "Quarterly" : client.return_frequency.toLowerCase().startsWith("m") ? "Monthly" : undefined)
+                : undefined
+            }
+            filingProfile={overviewData?.filing_profile || client?.filing_profile}
             uploadedDocs={uploadedDocs}
             ledgerRecords={ledgerRecords}
             initialTab={gstSubTab as any}

@@ -4,7 +4,7 @@ Phase 7 — GSTR-1, GSTR-2B, GSTR-3B, discrepancy detection, and explainable CA 
 """
 
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
@@ -148,6 +148,7 @@ class Gstr3bResponse(BaseModel):
     settlement_summary: Optional[str] = None
     needs_ca_review: bool = False
     review_notes: List[str] = Field(default_factory=list)
+    filing_profile: Optional[Dict[str, Any]] = None
 
 
 # ── Discrepancy Items ─────────────────────────────────────────────────

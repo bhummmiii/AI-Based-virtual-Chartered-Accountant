@@ -43,7 +43,19 @@ const initials = (company: string) =>
 
 /** Map a backend ClientCard to the frontend Client type. */
 function toClient(card: ClientCard): Client {
-  const isMonth = (card.clientType || card.return_frequency || "").toLowerCase().includes("month");
+  let resolvedFreq: "Monthly" | "Quarterly" | undefined = undefined;
+  if (card.filing_profile?.frequency) {
+    resolvedFreq = card.filing_profile.frequency === "quarterly" ? "Quarterly" : "Monthly";
+  } else if (card.return_frequency) {
+    const raw = card.return_frequency.toLowerCase();
+    if (raw.includes("quarter") || raw === "q") resolvedFreq = "Quarterly";
+    else if (raw.includes("month") || raw === "m") resolvedFreq = "Monthly";
+  } else if (card.clientType) {
+    const raw = card.clientType.toLowerCase();
+    if (raw.includes("quarter") || raw === "q") resolvedFreq = "Quarterly";
+    else if (raw.includes("month") || raw === "m") resolvedFreq = "Monthly";
+  }
+
   return {
     id: card.id,                  // client_code, e.g. "C-1042"
     name: card.name,              // contact_person
@@ -58,8 +70,9 @@ function toClient(card: ClientCard): Client {
     risk: card.risk as Client["risk"],
     lastActivity: card.lastActivity ?? "Recently",
     avatar: card.avatar ?? initials(card.company),
-    clientType: isMonth ? "Monthly" : "Quarterly",
-    return_frequency: card.return_frequency ?? (isMonth ? "Monthly" : "Quarterly"),
+    clientType: resolvedFreq,
+    return_frequency: resolvedFreq,
+    filing_profile: card.filing_profile,
     contactNumber: card.contactNumber ?? "",
     emailAddress: card.emailAddress ?? "",
     location: card.location ?? "",

@@ -14,7 +14,7 @@ db_id           ←→  Client.id    (UUID, sent as string to frontend)
 import re
 import uuid
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from app.schemas.accounting import AccountingRecordResponse
@@ -170,6 +170,7 @@ class ClientCardResponse(BaseModel):
     contactNumber: Optional[str] = None
     emailAddress: Optional[str] = None
     location: Optional[str] = None
+    filing_profile: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -201,6 +202,7 @@ class ClientResponse(BaseModel):
     location: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    filing_profile: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -236,6 +238,7 @@ class ClientOverviewResponse(BaseModel):
     client_type: Optional[str] = None
     billing_cycle: Optional[str] = None
     return_frequency: Optional[str] = "Quarterly"
+    filing_profile: Optional[Dict[str, Any]] = None
 
 
 # ── Activity history ──────────────────────────────────────────

@@ -60,6 +60,7 @@ interface GstWorkspaceViewProps {
   clientName: string; // e.g. "Bhumiiiii"
   clientGstin?: string;
   returnFrequency?: string; // Monthly | Quarterly
+  filingProfile?: any;
   uploadedDocs: any[];
   ledgerRecords: any[];
   initialTab?: GstTab;
@@ -74,14 +75,29 @@ export function GstWorkspaceView({
   clientCode,
   clientName,
   clientGstin,
-  returnFrequency = "Quarterly",
+  returnFrequency,
+  filingProfile,
   uploadedDocs: propUploadedDocs,
   ledgerRecords,
   initialTab,
   onViewDoc,
   onViewVoucher,
 }: GstWorkspaceViewProps) {
-  const isQuarterly = (returnFrequency || "").toLowerCase().includes("quarter");
+  // Single source of truth for return frequency
+  const frequency = useMemo(() => {
+    if (filingProfile?.frequency) {
+      return filingProfile.frequency.toLowerCase();
+    }
+    if (returnFrequency) {
+      const lower = returnFrequency.toLowerCase().trim();
+      if (lower.startsWith("q")) return "quarterly";
+      if (lower.startsWith("m")) return "monthly";
+    }
+    return null;
+  }, [filingProfile, returnFrequency]);
+
+  const isQuarterly = frequency === "quarterly";
+  const displayFrequency = frequency === "quarterly" ? "Quarterly" : frequency === "monthly" ? "Monthly" : null;
 
   const [activeTab, setActiveTab] = useState<GstTab>(initialTab || "gstr3b");
 
@@ -93,7 +109,7 @@ export function GstWorkspaceView({
   const [loading, setLoading] = useState(false);
   // Initialise the period based on the client's filing frequency
   const [selectedPeriod, setSelectedPeriod] = useState<string>(
-    isQuarterly ? "2026-Q2" : "2026-09"
+    isQuarterly ? "2026-Q2" : frequency === "monthly" ? "2026-09" : "all"
   );
   const [fetchedDocs, setFetchedDocs] = useState<any[]>([]);
 
@@ -705,18 +721,25 @@ export function GstWorkspaceView({
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5">
-              {/* Filing frequency badge */}
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
-                  isQuarterly
-                    ? "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400"
-                    : "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400"
-                )}
-              >
-                <Calendar className="size-3 mr-1" />
-                {isQuarterly ? "Quarterly" : "Monthly"}
-              </span>
+              {/* Filing frequency badge or setup notice */}
+              {frequency ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                    isQuarterly
+                      ? "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400"
+                      : "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400"
+                  )}
+                >
+                  <Calendar className="size-3 mr-1" />
+                  {displayFrequency}
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                  <AlertTriangle className="size-3 mr-1" />
+                  Set the return frequency in the client profile
+                </span>
+              )}
               <span className="text-xs text-muted-foreground font-medium">Period:</span>
               <select
                 value={selectedPeriod}
@@ -757,8 +780,13 @@ export function GstWorkspaceView({
             </Button>
             <Button
               size="sm"
-              className="h-8 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white"
+              className={cn(
+                "h-8 text-xs font-medium text-white",
+                frequency ? "bg-emerald-600 hover:bg-emerald-500" : "bg-muted text-muted-foreground cursor-not-allowed opacity-60"
+              )}
               onClick={openFilingModal}
+              disabled={!frequency}
+              title={!frequency ? "Set the return frequency in the client profile" : "Record return filing"}
             >
               <Plus className="size-3.5 mr-1" /> Record Return Filing
             </Button>
@@ -1995,7 +2023,7 @@ export function GstWorkspaceView({
                     <SelectItem value="GSTR-9">GSTR-9 (Annual Return)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-[10px] text-muted-foreground">{returnFrequency} filing profile</p>
+                <p className="text-[10px] text-muted-foreground">{displayFrequency || "Configured"} filing profile</p>
               </div>
             </div>
 
@@ -2038,7 +2066,7 @@ export function GstWorkspaceView({
                 value={filingDueDate}
                 readOnly
               />
-              <p className="text-[10px] text-muted-foreground">Computed by GST rules for {returnFrequency} {filingForm}</p>
+              <p className="text-[10px] text-muted-foreground">Computed by GST rules for {displayFrequency || "Configured"} {filingForm}</p>
             </div>
           </div>
 

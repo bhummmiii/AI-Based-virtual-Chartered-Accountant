@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories.client_repository import ClientRepository
 from app.core.exceptions import NotFoundException, ConflictException
+from app.services.gst_filing_service import get_filing_profile
 from app.models.client import Client
 from app.models.gst_record import GSTRecord
 from app.models.tax_record import TaxRecord
@@ -158,7 +159,7 @@ class ClientService:
             risk_level=R_FE2DB.get(data.risk, "low"),
             # new fields
             billing_cycle=(data.clientType or "monthly").lower(),
-            return_frequency=(data.clientType or "Monthly").capitalize(),
+            return_frequency=("Monthly" if str(data.return_frequency or data.clientType or "").strip().lower() in ("monthly", "m") else "Quarterly" if str(data.return_frequency or data.clientType or "").strip().lower() in ("quarterly", "q") else None),
             contact_number=data.contactNumber or data.phone,
             email_address=data.emailAddress or data.email,
             email=data.emailAddress or data.email,
@@ -336,7 +337,8 @@ class ClientService:
         e_addr = client.email_address or client.email or None
         c_type = T_DB2FE.get(client.client_type, client.client_type.title())
         b_cycle = (client.billing_cycle or "monthly").capitalize()
-        r_freq = (client.return_frequency or ("Monthly" if b_cycle == "Monthly" else "Quarterly")).capitalize()
+        profile = get_filing_profile(client)
+        r_freq = profile["frequency"].capitalize() if profile["frequency"] else None
 
         return ClientOverviewResponse(
             client_id=str(client.id),
@@ -366,6 +368,7 @@ class ClientService:
             client_type=c_type,
             billing_cycle=b_cycle,
             return_frequency=r_freq,
+            filing_profile=profile,
         )
 
     # ── UPDATE ─────────────────────────────────────────────────
@@ -741,8 +744,9 @@ class ClientService:
         loc = client.location or (f"{client.city}, {client.state}" if client.city and client.state else client.city or client.state or None)
         c_num = client.contact_number or client.phone or None
         e_addr = client.email_address or client.email or None
+        profile = get_filing_profile(client)
         c_type = (client.billing_cycle or "monthly").capitalize()
-        r_freq = (client.return_frequency or ("Monthly" if c_type == "Monthly" else "Quarterly")).capitalize()
+        r_freq = profile["frequency"].capitalize() if profile["frequency"] else None
 
         return ClientCardResponse(
             id=client.client_code,
@@ -760,10 +764,11 @@ class ClientService:
             avatar=_initials(client.company_name),
             db_id=str(client.id),
             return_frequency=r_freq,
-            clientType=c_type,
+            clientType=r_freq or c_type,
             contactNumber=c_num,
             emailAddress=e_addr,
             location=loc,
+            filing_profile=profile,
         )
 
     @staticmethod

@@ -74,6 +74,7 @@ export type Client = {
   // Extended fields (stored in DB, not shown on workspace cards)
   clientType?: "Monthly" | "Quarterly";
   return_frequency?: string;
+  filing_profile?: any;
   contactNumber?: string;
   emailAddress?: string;
   location?: string;

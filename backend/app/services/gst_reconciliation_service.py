@@ -22,6 +22,7 @@ from app.models.chart_of_accounts import ChartOfAccounts
 from app.models.accounting_record import AccountingRecord
 from app.models.gst_record import GSTRecord
 from app.services.chart_of_accounts_service import determine_account_role
+from app.services.gst_filing_service import get_filing_profile
 from app.core.exceptions import NotFoundException, ForbiddenException, BadRequestException
 from app.schemas.gst_reconciliation import (
     GstReconciliationInvoiceItem,
@@ -1280,6 +1281,7 @@ class GstReconciliationService:
             settlement_summary=settlement_summary,
             needs_ca_review=needs_ca_review,
             review_notes=review_notes,
+            filing_profile=get_filing_profile(client),
         )
 
     # ── 4. Discrepancy Detection Engine ──────────────────────────────────
