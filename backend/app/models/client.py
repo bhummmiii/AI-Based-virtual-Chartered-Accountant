@@ -33,7 +33,7 @@ class Client(Base):
     status = Column(String(20), nullable=False, default="active")
     # ── New fields ────────────────────────────────
     billing_cycle = Column(String(20), nullable=True, default="monthly")            # monthly | quarterly  (frontend: Client Type)
-    return_frequency = Column(String(20), nullable=True, default="Quarterly", server_default="Quarterly")  # Monthly | Quarterly
+    return_frequency = Column(String(20), nullable=True)                              # Monthly | Quarterly
     contact_number = Column(String(20), nullable=True)                              # mobile number
     email_address = Column(String(255), nullable=True)                              # client email (separate from CA email)
     location = Column(String(255), nullable=True)                                   # city, state

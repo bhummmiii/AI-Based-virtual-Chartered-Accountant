@@ -27,8 +27,11 @@ from app.schemas.gst_reconciliation import (
     Gstr3bResponse,
     GstDiscrepancyReportResponse,
     GstFinancialInsightsResponse,
+    FilingOptionsResponse,
+    FilingPreviewResponse,
 )
 from app.services.gst_reconciliation_service import GstReconciliationService
+from app.services.gst_filing_service import get_filing_options, get_filing_preview
 
 router = APIRouter()
 
@@ -253,6 +256,57 @@ def list_gst_records(
         success=True,
         message="GST records retrieved successfully",
         data=records,
+    )
+
+
+# ── 5b. Filing Options & Preview (G2) ──────────────────────────────────
+
+@router.get(
+    "/filing-options",
+    response_model=APIResponse[FilingOptionsResponse],
+    summary="Get eligible statutory filing periods and forms for client",
+)
+def get_filing_options_endpoint(
+    client_id: uuid.UUID = Query(..., description="Target Client UUID"),
+    today: Optional[date] = Query(None, description="Injectable reference date for evaluation"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    client = GstReconciliationService.verify_client_access(db, client_id, current_user)
+    options = get_filing_options(db=db, client=client, today=today)
+    return APIResponse(
+        success=True,
+        message="Filing options retrieved successfully",
+        data=options,
+    )
+
+
+@router.get(
+    "/filing-preview",
+    response_model=APIResponse[FilingPreviewResponse],
+    summary="Get statutory filing preview figures and blockers",
+)
+def get_filing_preview_endpoint(
+    client_id: uuid.UUID = Query(..., description="Target Client UUID"),
+    period: str = Query(..., description="Filing Period (e.g. 2026-Q2 or 2026-09)"),
+    form: str = Query("GSTR-3B", description="Return Form (GSTR-3B or GSTR-1)"),
+    today: Optional[date] = Query(None, description="Injectable reference date for evaluation"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    client = GstReconciliationService.verify_client_access(db, client_id, current_user)
+    preview = get_filing_preview(
+        db=db,
+        client=client,
+        period=period,
+        form=form,
+        user=current_user,
+        today=today,
+    )
+    return APIResponse(
+        success=True,
+        message="Filing preview computed successfully",
+        data=preview,
     )
 
 

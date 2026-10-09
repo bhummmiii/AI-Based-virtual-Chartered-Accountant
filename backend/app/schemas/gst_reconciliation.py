@@ -220,3 +220,70 @@ class Gstr1HsnSummaryResponse(BaseModel):
     total_taxable_value: Decimal = Decimal("0.00")
     total_tax_amount: Decimal = Decimal("0.00")
     hsn_items: List[Gstr1HsnItem] = []
+
+
+# ── Filing Options & Preview (G2) ──────────────────────────────────────
+class FilingPeriodOption(BaseModel):
+    key: str
+    label: str
+    start_date: date
+    end_date: date
+    status: str  # "open" | "filed" | "voided-refileable"
+    is_selectable: bool = True
+    reason: Optional[str] = None
+    is_nil: bool = False
+
+
+class FilingReturnFormOption(BaseModel):
+    code: str
+    label: str
+
+
+class FilingOptionsResponse(BaseModel):
+    client_id: uuid.UUID
+    frequency: Optional[str] = None  # "monthly" | "quarterly" | None
+    filing_profile: Dict[str, Any]
+    periods: List[FilingPeriodOption] = []
+    default_period: Optional[str] = None
+    return_forms: List[FilingReturnFormOption] = []
+    reason: Optional[str] = None
+
+
+class FilingBlocker(BaseModel):
+    code: str
+    message: str
+
+
+class FilingPreviewResponse(BaseModel):
+    client_id: uuid.UUID
+    period: str
+    form: str
+    period_type: str  # "monthly" | "quarterly"
+    period_start: date
+    period_end: date
+    taxable_value: Decimal = Decimal("0.00")
+    liability_igst: Decimal = Decimal("0.00")
+    liability_cgst: Decimal = Decimal("0.00")
+    liability_sgst: Decimal = Decimal("0.00")
+    liability_cess: Decimal = Decimal("0.00")
+    total_liability: Decimal = Decimal("0.00")
+    credit_igst: Decimal = Decimal("0.00")
+    credit_cgst: Decimal = Decimal("0.00")
+    credit_sgst: Decimal = Decimal("0.00")
+    credit_cess: Decimal = Decimal("0.00")
+    total_credit: Decimal = Decimal("0.00")
+    cash_payable_igst: Decimal = Decimal("0.00")
+    cash_payable_cgst: Decimal = Decimal("0.00")
+    cash_payable_sgst: Decimal = Decimal("0.00")
+    total_cash_payable: Decimal = Decimal("0.00")
+    itc_reversal_payable_igst: Decimal = Decimal("0.00")
+    itc_reversal_payable_cgst: Decimal = Decimal("0.00")
+    itc_reversal_payable_sgst: Decimal = Decimal("0.00")
+    itc_reversal_payable_total: Decimal = Decimal("0.00")
+    excess_credit_carried_forward: Decimal = Decimal("0.00")
+    itc_carried_forward_igst: Decimal = Decimal("0.00")
+    itc_carried_forward_cgst: Decimal = Decimal("0.00")
+    itc_carried_forward_sgst: Decimal = Decimal("0.00")
+    due_date: str
+    is_nil_return: bool = False
+    blockers: List[FilingBlocker] = []

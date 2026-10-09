@@ -1025,6 +1025,7 @@ class GstReconciliationService:
         Compute consolidated GSTR-3B return summary (Table 3.1 Outward & Table 4 ITC).
         Implements statutory set-off order (CGST Act Sections 49, 49A, 49B) and Table 6 cash payable.
         """
+        client = cls.verify_client_access(db, client_id, user)
         gstr1 = cls.reconcile_gstr1(db, client_id, user, period, from_date, to_date)
         gstr2b = cls.reconcile_gstr2b(db, client_id, user, period, from_date, to_date)
 
