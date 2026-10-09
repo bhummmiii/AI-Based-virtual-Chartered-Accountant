@@ -18,6 +18,8 @@ class GSTRecordCreate(BaseModel):
     total_tax: Optional[Decimal] = None
     filing_status: str = "pending"
     due_date: Optional[date] = None
+    period_type: Optional[str] = None
+    frequency_at_filing: Optional[str] = None
 
 
 class GSTRecordResponse(BaseModel):
@@ -37,6 +39,8 @@ class GSTRecordResponse(BaseModel):
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     period_label: Optional[str] = None
+    period_type: Optional[str] = None
+    frequency_at_filing: Optional[str] = None
     void_reason: Optional[str] = None
     voided_at: Optional[datetime] = None
     created_at: datetime

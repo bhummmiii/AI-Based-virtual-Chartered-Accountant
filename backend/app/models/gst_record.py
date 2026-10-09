@@ -28,6 +28,8 @@ class GSTRecord(Base):
     period_start = Column(Date, nullable=True)
     period_end = Column(Date, nullable=True)
     period_label = Column(String(50), nullable=True)
+    period_type = Column(String(20), nullable=True)          # monthly | quarterly
+    frequency_at_filing = Column(String(20), nullable=True)  # monthly | quarterly
     void_reason = Column(String(500), nullable=True)
     voided_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

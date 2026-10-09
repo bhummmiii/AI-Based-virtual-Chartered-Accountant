@@ -31,7 +31,13 @@ from app.schemas.gst_reconciliation import (
     FilingPreviewResponse,
 )
 from app.services.gst_reconciliation_service import GstReconciliationService
-from app.services.gst_filing_service import get_filing_options, get_filing_preview
+from app.services.gst_filing_service import (
+    get_filing_options,
+    get_filing_preview,
+    get_filing_profile,
+    calculate_due_date,
+    get_period_date_range,
+)
 
 router = APIRouter()
 
@@ -323,34 +329,43 @@ def create_gst_record(
 ):
     client = GstReconciliationService.verify_client_access(db, payload.client_id, current_user)
 
-    # 1. Reject unselected period
+    # 1. Enforce return frequency configuration on client
+    profile = get_filing_profile(client)
+    freq = profile.get("frequency")
+    if not freq:
+        raise BadRequestException(
+            detail="FREQUENCY_NOT_SET: Return frequency must be configured before recording a filing."
+        )
+
+    # 2. Reject unselected period
     period_str = (payload.gst_period or "").strip()
     if not period_str or period_str.lower() in ("all", "all available", "all_available"):
         raise BadRequestException(
             detail="Filing Blocked: Please select a specific statutory return period before recording a filing."
         )
 
-    # 2. Reject period not matching client's return frequency
-    client_freq = (client.return_frequency or "Monthly").strip()
+    # 3. Reject period not matching client's return frequency
     is_quarterly_period = "Q" in period_str.upper()
-    if client_freq == "Quarterly" and not is_quarterly_period:
+    if freq == "quarterly" and not is_quarterly_period:
         raise BadRequestException(
-            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency ({client_freq}). Quarterly clients must file for quarters (e.g., 2026-Q2)."
+            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency (Quarterly). Quarterly clients must file for quarters (e.g., 2026-Q2)."
         )
-    elif client_freq == "Monthly" and is_quarterly_period:
+    elif freq == "monthly" and is_quarterly_period:
         raise BadRequestException(
-            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency ({client_freq}). Monthly clients must file for months (e.g., 2026-09)."
+            detail=f"Filing Blocked: Period '{period_str}' does not match client's return frequency (Monthly). Monthly clients must file for months (e.g., 2026-09)."
         )
 
-    # 3. Parse period dates and reject period that has not ended yet (period end >= today)
-    start_d, end_d = GstReconciliationService._parse_period_dates(period_str, None, None)
+    # 4. Parse period dates and reject period that has not ended yet (period end >= today)
+    start_d, end_d = get_period_date_range(period_str)
+    if not start_d or not end_d:
+        start_d, end_d = GstReconciliationService._parse_period_dates(period_str, None, None)
     today = date.today()
     if not end_d or end_d >= today:
         raise BadRequestException(
             detail=f"Filing Blocked: Period '{period_str}' has not ended yet (period ends on {end_d}, today is {today}). Filings can only be recorded after the period has closed."
         )
 
-    # 4. Reject duplicate filing for same client, period, and return type
+    # 5. Reject duplicate filing for same client, period, and return type
     existing = (
         db.query(GSTRecord)
         .filter(
@@ -366,7 +381,7 @@ def create_gst_record(
             detail=f"Filing record already exists for {payload.gst_type} period {period_str} (Status: {existing.filing_status}). Duplicate filing rejected."
         )
 
-    # 5. Server-Authoritative: ignore client-supplied amounts and compute figures directly from server ledger
+    # 6. Server-Authoritative: ignore client-supplied amounts and compute figures directly from server ledger
     if payload.gst_type == "GSTR-1":
         recon = GstReconciliationService.reconcile_gstr1(
             db, payload.client_id, current_user, period=period_str
@@ -392,7 +407,7 @@ def create_gst_record(
         igst = Decimal("0.00")
         total_tax = Decimal("0.00")
 
-    # 6. Statutory Validation Gate:
+    # 7. Statutory Validation Gate:
     # A. Tax liability and taxable turnover cannot be negative under statutory GST rules
     if (total_tax is not None and total_tax < Decimal("0.00")) or (taxable_amount is not None and taxable_amount < Decimal("0.00")):
         raise BadRequestException(
@@ -412,10 +427,12 @@ def create_gst_record(
                 detail=f"Statutory Filing Blocked: {discrepancies.high_count} unresolved high-risk discrepancy(ies) detected for period {period_str}. Resolve discrepancies before recording return filing."
             )
 
-    # 7. Compute period_label for quarterly / monthly clients
+    # 8. Compute period_label, period_type, frequency_at_filing
+    period_type = "quarterly" if is_quarterly_period else "monthly"
+    frequency_at_filing = freq
     period_label = None
     if start_d and end_d:
-        if client_freq == "Quarterly" or is_quarterly_period:
+        if is_quarterly_period:
             if start_d.month in [4, 5, 6]:
                 q_str = "Q1"
                 fy_str = f"FY {start_d.year}-{str(start_d.year+1)[-2:]}"
@@ -434,24 +451,12 @@ def create_gst_record(
 
     due_date = payload.due_date
     if not due_date and end_d:
-        due_year = end_d.year if end_d.month < 12 else end_d.year + 1
-        due_month = end_d.month + 1 if end_d.month < 12 else 1
-        if payload.gst_type == "GSTR-1":
-            due_day = 13 if (client_freq == "Quarterly" or is_quarterly_period) else 11
-        elif payload.gst_type == "GSTR-3B":
-            if client_freq == "Quarterly" or is_quarterly_period:
-                st_code = (client.gst_number or "")[:2]
-                cat1 = ["22", "23", "24", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "37"]
-                due_day = 22 if st_code in cat1 else 24
-            else:
-                due_day = 20
-        elif payload.gst_type == "GSTR-9":
-            due_year = end_d.year
-            due_month = 12
-            due_day = 31
-        else:
-            due_day = 20
-        due_date = date(due_year, due_month, due_day)
+        due_date = calculate_due_date(
+            period_end=end_d,
+            form=payload.gst_type,
+            frequency=freq,
+            state_code=profile.get("state_code"),
+        )
 
     record = GSTRecord(
         id=uuid.uuid4(),
@@ -468,6 +473,8 @@ def create_gst_record(
         period_start=start_d,
         period_end=end_d,
         period_label=period_label,
+        period_type=period_type,
+        frequency_at_filing=frequency_at_filing,
     )
     db.add(record)
 
