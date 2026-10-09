@@ -22,6 +22,7 @@ import { PageHeader } from "../components/common/PageHeader";
 import { StatusBadge } from "../components/common/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { Separator } from "../components/ui/separator";
 import { cn } from "../components/ui/utils";
@@ -353,7 +354,12 @@ export function Dashboard() {
           {/* Today's tasks */}
           <Card>
             <CardHeader className="flex-row items-center justify-between">
-              <CardTitle>Today's Tasks</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle>Today's Tasks</CardTitle>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60 py-0 h-4">
+                  Sample data
+                </Badge>
+              </div>
               <span className="text-sm text-muted-foreground">
                 {derivedTasks.filter((t) => !taskDoneMap[t.id]).length} pending
               </span>
@@ -435,9 +441,14 @@ export function Dashboard() {
           {/* Deadlines */}
           <Card>
             <CardHeader className="flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <CalendarClock className="size-4 text-muted-foreground" /> Upcoming Deadlines
-              </CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2">
+                  <CalendarClock className="size-4 text-muted-foreground" /> Upcoming Deadlines
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60 py-0 h-4">
+                  Sample data
+                </Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-2">
               {derivedDeadlines.map((d) => (
