@@ -765,7 +765,7 @@ export function GstWorkspaceView({
               className="h-8 text-xs font-medium"
               onClick={() => setActiveTab("returns")}
             >
-              <Landmark className="size-3.5 mr-1.5" /> Filed Returns ({filingRecords.length})
+              <Landmark className="size-3.5 mr-1.5" /> Filed Returns ({filedCount})
             </Button>
             <Button
               variant={activeTab === "hsn" ? "default" : "outline"}
