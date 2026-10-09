@@ -21,6 +21,7 @@ from app.api.routers.accounting.router import router as accounting_router
 from app.api.routers.tax.router import router as tax_router
 from app.api.routers.reports.router import router as reports_router
 from app.api.routers.chatbot.router import router as chatbot_router
+from app.api.routers.notifications.router import router as notifications_router
 # Register all 10 models with Base.metadata
 import app.models  # noqa: F401
 
@@ -106,3 +107,4 @@ app.include_router(accounting_router, prefix="/api/v1/accounting", tags=["Accoun
 app.include_router(tax_router, prefix="/api/v1/tax", tags=["Tax"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(chatbot_router, prefix="/api/v1/chatbot", tags=["Chatbot"])
+app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])

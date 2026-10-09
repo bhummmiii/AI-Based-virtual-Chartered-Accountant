@@ -72,7 +72,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => (localStorage.getItem("fl_theme") as "light" | "dark") || "light",
   );
   const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!localStorage.getItem("ca_token"));
   const [error, setError] = useState<string | null>(null);
 
   const [tokenReady, setTokenReady] = useState(() => !!localStorage.getItem("ca_token"));

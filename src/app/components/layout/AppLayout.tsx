@@ -14,10 +14,14 @@ import {
   ChevronDown,
   Sun,
   Moon,
+  CheckCheck,
+  Clock,
+  ArrowRight,
 } from "lucide-react";
 import { Input } from "../ui/input";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { GlobalSearch } from "../common/GlobalSearch";
+import notificationService, { AppNotification } from "../../services/notification.service";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -91,93 +95,101 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function formatRelativeTime(dateString?: string): string {
+  if (!dateString) return "Just now";
+  try {
+    const now = Date.now();
+    const date = new Date(dateString).getTime();
+    if (isNaN(date)) return "Recently";
+    const diffSec = Math.max(0, Math.floor((now - date) / 1000));
+    if (diffSec < 60) return "Just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
+  } catch {
+    return "Recently";
+  }
+}
+
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const { theme, toggleTheme, refreshClients, clients } = useApp();
   const [currentUser, setCurrentUser] = useState(getStoredUser());
 
-  // Derive notifications dynamically from the current CA's actual clients
-  const dynamicNotifications = useMemo(() => {
-    if (!clients || !clients.length) {
-      return [
-        { id: 1, title: "Workspace initialized", body: "Add your first client to start auditing and tracking filings.", time: "Just now", type: "info", unread: true },
-        { id: 2, title: "New GST circular published", body: "Circular 214/8/2026 — e-invoicing threshold update.", time: "2d ago", type: "info", unread: false },
-      ];
-    }
-    const dueClients = clients.filter((c) => c.gst === "Due" || c.gst === "Overdue");
-    const flaggedClient = clients.find((c) => c.audit === "Flagged");
-    const activeClient = clients.find((c) => c.status === "Active") || clients[0];
+  // ── Live Notifications State ────────────────────────────────
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
 
-    const notifs = [];
-    if (dueClients.length > 0) {
-      notifs.push({
-        id: 1,
-        title: "GSTR-3B due in 5 days",
-        body: `Filing due for ${dueClients.slice(0, 2).map((c) => c.company).join(", ")}${dueClients.length > 2 ? ` + ${dueClients.length - 2} more` : ""}.`,
-        time: "2h ago",
-        type: "warning",
-        unread: true,
-      });
-    } else {
-      notifs.push({
-        id: 1,
-        title: "All GST returns up-to-date",
-        body: `All active clients currently filed for recent period.`,
-        time: "2h ago",
-        type: "success",
-        unread: false,
-      });
+  const fetchLiveNotifications = async () => {
+    try {
+      const data = await notificationService.getNotifications();
+      if (data && data.notifications) {
+        setNotifications(data.notifications);
+        setUnreadCount(
+          data.unread_count ?? data.notifications.filter((n) => !n.is_read).length
+        );
+      }
+    } catch (e) {
+      console.warn("Error fetching live notifications:", e);
     }
+  };
 
-    if (flaggedClient) {
-      notifs.push({
-        id: 2,
-        title: "Audit flag raised",
-        body: `${flaggedClient.company} — suspicious journal entries detected.`,
-        time: "5h ago",
-        type: "danger",
-        unread: true,
-      });
-    } else {
-      notifs.push({
-        id: 2,
-        title: "Audit health check passed",
-        body: `Compliance verified for ${activeClient.company}.`,
-        time: "5h ago",
-        type: "success",
-        unread: true,
-      });
+  const handleNotificationClick = async (notif: AppNotification) => {
+    // 1. Mark as read immediately in local state
+    if (!notif.is_read) {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n))
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      try {
+        await notificationService.markAsRead(notif.id);
+      } catch (err) {
+        console.warn("Failed to mark notification read:", err);
+      }
     }
 
-    notifs.push({
-      id: 3,
-      title: "Invoice OCR complete",
-      body: `12 invoices processed with 98% avg confidence for ${activeClient.company}.`,
-      time: "1d ago",
-      type: "success",
-      unread: false,
-    });
+    // 2. Navigate immediately to linked section if present
+    if (notif.link) {
+      navigate(notif.link);
+    }
+  };
 
-    notifs.push({
-      id: 4,
-      title: "New GST circular published",
-      body: "Circular 214/8/2026 — e-invoicing threshold update.",
-      time: "2d ago",
-      type: "info",
-      unread: false,
-    });
+  const handleMarkAllRead = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+    try {
+      await notificationService.markAllAsRead();
+    } catch (err) {
+      console.warn("Failed to mark all notifications read:", err);
+    }
+  };
 
-    return notifs;
-  }, [clients]);
-
-  const unread = dynamicNotifications.filter((n) => n.unread).length;
-
-  // Fetch clients and refresh user profile whenever authenticated shell mounts
+  // Fetch clients, refresh user profile, and start real-time notification sync
   useEffect(() => {
     setCurrentUser(getStoredUser());
     refreshClients();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchLiveNotifications();
+
+    // Real-time polling every 15 seconds
+    const timer = setInterval(fetchLiveNotifications, 15000);
+
+    // Instant update on custom application events (upload, filing, verification)
+    const handleUpdate = () => {
+      fetchLiveNotifications();
+    };
+    window.addEventListener("finledger:notification-update", handleUpdate);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("finledger:notification-update", handleUpdate);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -225,29 +237,91 @@ export function AppLayout() {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
+                <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
                   <Bell className="size-5" />
-                  {unread > 0 && (
-                    <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-destructive ring-2 ring-card" />
+                  {unreadCount > 0 && (
+                    <span className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-destructive ring-2 ring-card animate-pulse" />
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel className="flex items-center justify-between">
-                  Notifications
-                  {unread > 0 && <span className="text-xs text-muted-foreground">{unread} unread</span>}
+              <DropdownMenuContent align="end" className="w-80 sm:w-96 max-h-[30rem] overflow-y-auto p-1 shadow-xl">
+                <DropdownMenuLabel className="flex items-center justify-between py-2 px-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm">Notifications</span>
+                    {unreadCount > 0 && (
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        {unreadCount} unread
+                      </span>
+                    )}
+                  </div>
+                  {unreadCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleMarkAllRead}
+                      className="text-xs text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 font-normal cursor-pointer"
+                    >
+                      <CheckCheck className="size-3.5" />
+                      Mark all read
+                    </button>
+                  )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {dynamicNotifications.map((n) => (
-                  <DropdownMenuItem key={n.id} className="flex-col items-start gap-0.5 whitespace-normal py-2.5">
-                    <div className="flex w-full items-center gap-2">
-                      {n.unread && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
-                      <span className="text-sm">{n.title}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{n.body}</span>
-                    <span className="text-xs text-muted-foreground">{n.time}</span>
-                  </DropdownMenuItem>
-                ))}
+                {notifications.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-muted-foreground">
+                    No notifications right now. You're all caught up!
+                  </div>
+                ) : (
+                  notifications.map((n) => (
+                    <DropdownMenuItem
+                      key={n.id}
+                      onClick={() => handleNotificationClick(n)}
+                      className={cn(
+                        "flex flex-col items-start gap-1 py-3 px-3 cursor-pointer transition-colors border-b border-border/40 last:border-b-0 outline-none",
+                        !n.is_read ? "bg-muted/40 hover:bg-muted/70" : "hover:bg-muted/30 opacity-80 hover:opacity-100"
+                      )}
+                    >
+                      <div className="flex w-full items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={cn(
+                              "size-2 shrink-0 rounded-full",
+                              !n.is_read
+                                ? n.severity === "danger"
+                                  ? "bg-rose-500 shadow-sm shadow-rose-500/50"
+                                  : n.severity === "warning"
+                                  ? "bg-amber-500 shadow-sm shadow-amber-500/50"
+                                  : n.severity === "success"
+                                  ? "bg-emerald-500 shadow-sm shadow-emerald-500/50"
+                                  : "bg-primary shadow-sm shadow-primary/50"
+                                : "bg-muted-foreground/30"
+                            )}
+                          />
+                          <span
+                            className={cn(
+                              "text-xs truncate font-medium",
+                              !n.is_read ? "text-foreground font-semibold" : "text-muted-foreground"
+                            )}
+                          >
+                            {n.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground shrink-0 flex items-center gap-1 font-mono">
+                          <Clock className="size-3" />
+                          {formatRelativeTime(n.created_at)}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground/90 pl-4 line-clamp-2 leading-relaxed">
+                        {n.message}
+                      </span>
+                      {n.link && (
+                        <div className="flex items-center gap-1 text-[11px] text-primary/80 hover:text-primary pl-4 mt-0.5 font-medium">
+                          <span>View section</span>
+                          <ArrowRight className="size-3" />
+                        </div>
+                      )}
+                    </DropdownMenuItem>
+                  ))
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <DropdownMenu>

@@ -80,19 +80,30 @@ export function ClientWorkspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const urlTab = searchParams.get("tab");
-  const { getClient } = useApp();
+  const urlGstTab = searchParams.get("gstTab");
+  const { getClient, loading, refreshClients, clients } = useApp();
   const client = getClient(clientId ?? "");
   const [tab, setTab] = useState(() => {
     if (urlTab === "gst") return "gsttax";
     if (urlTab) return urlTab;
     return "overview";
   });
+  const [gstSubTab, setGstSubTab] = useState<string | undefined>(() => urlGstTab || undefined);
+
+  useEffect(() => {
+    if (!client && clients.length === 0) {
+      refreshClients();
+    }
+  }, [client, clients.length, refreshClients]);
 
   useEffect(() => {
     if (urlTab) {
       setTab(urlTab === "gst" ? "gsttax" : urlTab);
     }
-  }, [urlTab]);
+    if (urlGstTab) {
+      setGstSubTab(urlGstTab);
+    }
+  }, [urlTab, urlGstTab]);
 
   // ── Invoice modal state ────────────────────────────────────
   const [docAction, setDocAction] = useState<DocAction>("upload");
@@ -122,7 +133,6 @@ export function ClientWorkspace() {
   const [previewDoc, setPreviewDoc] = useState<{ id: string; fileName: string; fileType: string | null } | null>(null);
   // ── Document detail (View) state ───────────────────────────
   const [viewDocId, setViewDocId] = useState<string | null>(null);
-  const [gstSubTab, setGstSubTab] = useState<string | undefined>(undefined);
 
   // ── AI Insights tab state ──────────────────────────────────
   const [aiInsights, setAiInsights] = useState<AIInsightItem[]>([]);
@@ -373,6 +383,15 @@ export function ClientWorkspace() {
       return true;
     });
   }, [displayTransactions, ledgerTypeFilter, ledgerStatusFilter, ledgerSearch]);
+
+  if (loading || (!client && clients.length === 0)) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <RefreshCw className="size-6 animate-spin text-primary" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading client workspace...</span>
+      </div>
+    );
+  }
 
   if (!client) {
     return (

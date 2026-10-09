@@ -84,6 +84,12 @@ export function GstWorkspaceView({
   const isQuarterly = (returnFrequency || "").toLowerCase().includes("quarter");
 
   const [activeTab, setActiveTab] = useState<GstTab>(initialTab || "gstr3b");
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   const [loading, setLoading] = useState(false);
   // Initialise the period based on the client's filing frequency
   const [selectedPeriod, setSelectedPeriod] = useState<string>(
