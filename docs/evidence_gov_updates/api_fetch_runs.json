@@ -1,0 +1,80 @@
+[
+  {
+    "id": "f447ac8a-0390-4c43-9db3-706f42db4c98",
+    "source_id": "ebc145b1-7e5e-45dd-9e92-9b5fea3bb2e8",
+    "source_code": "nfra_orders",
+    "started_at": "2026-10-12T16:41:54.821827+05:30",
+    "finished_at": "2026-10-12T16:41:59.528466+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 1,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  },
+  {
+    "id": "156a319a-77de-4adb-9adc-52eaea8686b1",
+    "source_id": "83ca6fdd-b193-45ac-b4f5-886bebfb6a7c",
+    "source_code": "egazette_recent",
+    "started_at": "2026-10-12T16:41:41.357847+05:30",
+    "finished_at": "2026-10-12T16:41:54.804649+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 4,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  },
+  {
+    "id": "0eecea6d-7da1-44b6-8c2d-1793f130569f",
+    "source_id": "5058c0ff-51ac-4b65-8199-b8f82a4fa195",
+    "source_code": "icai_announcements",
+    "started_at": "2026-10-12T16:41:18.410941+05:30",
+    "finished_at": "2026-10-12T16:41:41.327663+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 16,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  },
+  {
+    "id": "ae4b2787-9964-46e9-b9e7-31e5732cba8a",
+    "source_id": "52dd8c02-b16a-4e52-b623-044ee7a9d4ca",
+    "source_code": "gstcouncil",
+    "started_at": "2026-10-12T16:39:48.517269+05:30",
+    "finished_at": "2026-10-12T16:41:18.373130+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 20,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  },
+  {
+    "id": "1974921d-6a22-4148-acd6-da91578a5125",
+    "source_id": "757367ca-a10a-45ce-bb3c-bce16aee084b",
+    "source_code": "rbi_pressreleases",
+    "started_at": "2026-10-12T16:39:17.881900+05:30",
+    "finished_at": "2026-10-12T16:39:48.482050+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 10,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  },
+  {
+    "id": "efb90314-6526-4cad-b2fd-3b00036ebbd1",
+    "source_id": "6e2b092e-b891-44af-bde4-be701939d835",
+    "source_code": "rbi_notifications",
+    "started_at": "2026-10-12T16:38:40.843339+05:30",
+    "finished_at": "2026-10-12T16:39:17.835535+05:30",
+    "status": "success",
+    "http_status": 200,
+    "items_new": 10,
+    "items_updated": 0,
+    "items_skipped": 0,
+    "error_message": null
+  }
+]

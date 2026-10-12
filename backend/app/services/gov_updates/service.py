@@ -110,10 +110,17 @@ class GovUpdateService:
         now = datetime.now(timezone.utc)
         seven_days_ago = now - timedelta(days=7)
 
+        def check_is_new(dt: Optional[datetime], backfilled: bool) -> bool:
+            if not dt or backfilled:
+                return False
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt >= seven_days_ago
+
         items_res: List[GovUpdateResponse] = []
         for u in updates:
             # is_new: first seen within last 7 days and not backfilled
-            is_new = bool(u.first_seen_at and u.first_seen_at >= seven_days_ago and not u.backfilled)
+            is_new = check_is_new(u.first_seen_at, bool(u.backfilled))
             is_saved = u.id in saved_ids_set
 
             items_res.append(
@@ -200,7 +207,12 @@ class GovUpdateService:
             is not None
         )
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-        is_new = bool(u.first_seen_at and u.first_seen_at >= seven_days_ago and not u.backfilled)
+        is_new = False
+        if u.first_seen_at and not u.backfilled:
+            seen_dt = u.first_seen_at
+            if seen_dt.tzinfo is None:
+                seen_dt = seen_dt.replace(tzinfo=timezone.utc)
+            is_new = seen_dt >= seven_days_ago
 
         return GovUpdateResponse(
             id=u.id,

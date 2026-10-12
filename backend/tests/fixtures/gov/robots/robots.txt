@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /private/
+Disallow: /api/crawler-blocked/
+
+User-agent: FinLedgerBot
+Disallow: /blocked-path/
+Crawl-delay: 5
