@@ -29,11 +29,12 @@ from app.models.uploaded_document import UploadedDocument
 from app.models.chart_of_accounts import ChartOfAccounts
 from app.models.journal_entry import JournalEntry, JournalEntryLine
 from app.models.accounting_period import AccountingPeriod
+from app.models.government_update import GovSource, GovUpdate, GovFetchRun, GovSavedUpdate
 
 __all__ = [
     "User", "Client", "AccountingRecord", "GSTRecord", "TaxRecord",
     "AuditReport", "Invoice", "Document", "GovernmentRule", "Notification",
     "UploadedDocument", "ChartOfAccounts", "JournalEntry", "JournalEntryLine",
-    "AccountingPeriod",
+    "AccountingPeriod", "GovSource", "GovUpdate", "GovFetchRun", "GovSavedUpdate",
 ]
 
