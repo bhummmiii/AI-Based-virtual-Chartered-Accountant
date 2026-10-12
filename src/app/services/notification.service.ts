@@ -78,19 +78,9 @@ export const notificationService = {
             is_read: true,
             created_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
           },
-          {
-            id: "fallback-5",
-            title: "New GST Circular Published",
-            message: "Circular 214/8/2026 — Clarification on e-invoicing thresholds & statutory reporting guidelines.",
-            category: "circular",
-            severity: "info",
-            link: "/app/updates",
-            is_read: true,
-            created_at: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-          },
         ],
-        unread_count: 3,
-        total_count: 5,
+        unread_count: 2,
+        total_count: 4,
       };
     }
   },

@@ -10,7 +10,7 @@ Provides real-time notifications for:
 
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.client import Client
 from app.models.uploaded_document import UploadedDocument
 from app.models.government_rule import GovernmentRule
+from app.models.government_update import GovUpdate
 from app.schemas.notification import NotificationResponse, NotificationListResponse
 
 logger = logging.getLogger(__name__)
@@ -140,23 +141,43 @@ class NotificationService:
                 )
             )
 
-        # E. Government Circular
-        gov_rule = db.query(GovernmentRule).filter(GovernmentRule.category == "GST").first()
-        if "New GST Circular Published" not in existing_titles:
-            circ_msg = "Circular 214/8/2026 — Clarification on e-invoicing thresholds & statutory reporting guidelines."
-            if gov_rule and gov_rule.title:
-                circ_msg = f"{gov_rule.title[:120]} (Source: {gov_rule.source or 'CBIC'})"
-            candidates.append(
-                Notification(
-                    user_id=user.id,
-                    title="New GST Circular Published",
-                    message=circ_msg,
-                    category="circular",
-                    severity="info",
-                    link="/app/updates",
-                    is_read=True,
-                )
+        # E. Government Updates (Real statutory items from GovUpdate)
+        now_dt = datetime.now(timezone.utc)
+        seven_days_ago = now_dt - timedelta(days=7)
+        recent_gov_updates = (
+            db.query(GovUpdate)
+            .filter(
+                GovUpdate.first_seen_at >= seven_days_ago,
+                GovUpdate.category.in_(["GST", "INCOME_TAX", "ACCOUNTING", "BANKING", "BUDGET"]),
             )
+            .order_by(GovUpdate.first_seen_at.desc())
+            .limit(5)
+            .all()
+        )
+        for upd in recent_gov_updates:
+            title_text = f"Statutory Update: {upd.category}"
+            if upd.doc_number:
+                title_text = f"{upd.category}: {upd.doc_number}"
+
+            existing = (
+                db.query(Notification)
+                .filter(Notification.user_id == user.id, Notification.link == "/app/updates")
+                .filter(Notification.message.like(f"%{upd.title[:50]}%"))
+                .first()
+            )
+            if not existing and title_text not in existing_titles:
+                src_name = upd.source.name if upd.source else (upd.source.code if upd.source else "Official")
+                candidates.append(
+                    Notification(
+                        user_id=user.id,
+                        title=title_text,
+                        message=f"{upd.title[:110]} (Source: {src_name})",
+                        category="circular",
+                        severity="info",
+                        link="/app/updates",
+                        is_read=False,
+                    )
+                )
 
         if candidates:
             db.add_all(candidates)

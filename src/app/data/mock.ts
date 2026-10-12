@@ -126,7 +126,6 @@ export const notifications = [
   { id: 1, title: "GSTR-3B due in 5 days", body: "For 4 clients across Maharashtra & Delhi.", time: "2h ago", type: "warning", unread: true },
   { id: 2, title: "Audit flag raised", body: "Coastal Exports — suspicious round-figure entries detected.", time: "5h ago", type: "danger", unread: true },
   { id: 3, title: "Invoice OCR complete", body: "12 invoices processed with 98% avg confidence.", time: "1d ago", type: "success", unread: false },
-  { id: 4, title: "New GST circular published", body: "Circular 214/8/2026 — e-invoicing threshold update.", time: "2d ago", type: "info", unread: false },
 ];
 
 export const todaysTasks = [
@@ -207,12 +206,7 @@ export const auditTimeline = [
   { time: "10:49", event: "Financial health score computed: 68/100", type: "info" },
 ];
 
-export const govRules = [
-  { id: 1, title: "E-invoicing threshold reduced to ₹5 Cr turnover", tag: "GST", date: "18 Jul 2026", summary: "Businesses above ₹5 crore annual turnover must now generate e-invoices for all B2B supplies.", bookmarked: true },
-  { id: 2, title: "New Section 44ADA presumptive limit for professionals", tag: "Income Tax", date: "12 Jul 2026", summary: "Presumptive taxation limit raised to ₹75 lakh for eligible professionals, subject to cash-receipt conditions.", bookmarked: false },
-  { id: 3, title: "TDS on virtual digital assets clarified", tag: "TDS", date: "05 Jul 2026", summary: "CBDT clarifies 1% TDS applicability on peer-to-peer VDA transfers via exchanges.", bookmarked: false },
-  { id: 4, title: "Budget 2026 — standard deduction increased", tag: "Budget", date: "01 Jul 2026", summary: "Standard deduction under the new regime increased to ₹75,000 for salaried taxpayers.", bookmarked: true },
-];
+export const govRules: Array<{ id: number; title: string; tag: string; date: string; summary: string; bookmarked: boolean }> = [];
 
 export const chatHistory = [
   { id: 1, title: "GST ITC reconciliation help", time: "Today" },
