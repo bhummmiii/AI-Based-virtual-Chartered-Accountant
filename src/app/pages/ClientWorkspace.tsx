@@ -38,6 +38,7 @@ import {
   type ParsedLedgerTransaction,
 } from "../components/client/VoucherDetailModal";
 import { GstWorkspaceView } from "../components/client/GstWorkspaceView";
+import { ClientReportsView } from "../components/client/ClientReportsView";
 import { ClientAiChatCard } from "../components/client/ClientAiChatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -991,20 +992,11 @@ export function ClientWorkspace() {
 
         {/* Reports */}
         <TabsContent value="reports" className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {["Balance Sheet", "Profit & Loss", "GST Summary", "Cash Flow"].map((r) => (
-              <Card key={r} className="p-5">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><FileText className="size-5" /></span>
-                  <p className="text-sm">{r}</p>
-                </div>
-                <div className="mt-4 flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1"><Download className="size-4" /> PDF</Button>
-                  <Button variant="outline" size="sm" className="flex-1"><Download className="size-4" /> Excel</Button>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <ClientReportsView
+            clientId={client.id}
+            clientDbId={clientDbId}
+            client={client}
+          />
         </TabsContent>
 
         {/* AI Insights */}
