@@ -71,6 +71,22 @@ Stage breakdown executed across 3 consecutive iterations (spaced 60s apart) from
 | `epfo` | `https://www.epfindia.gov.in` | 200 | `ok` | Working (optional source) |
 | `esic` | `https://www.esic.gov.in` | 200 | `ok` | Working (optional source) |
 
+### 2.1. Owner Next Steps for Blocked & Unreachable Sources (K2 Protocol)
+
+In strict accordance with Hard Rule **R6** (Never bypass WAF/CAPTCHA or spoof bot headers), blocked/unreachable sources remain in their empirical state. The table below documents the root cause and the required administrative action:
+
+| Source Code | Classification | Failure Stage | Root Cause (Bot Block vs Network vs Site Down) | Legitimate Owner Next Step |
+|---|---|---|---|---|
+| `incometax_feed` | `blocked_requires_verification` | `http_challenge` | **Bot Block:** Akamai Edge WAF rejects automated crawlers (returns HTTP 403 on `/tax-feeds` and direct RSS feeds). | Use **K10 Manual Import** for ITD circulars/notifications, or formally apply to the Income Tax Directorate of Systems for authorized API syndication. |
+| `gstn_news` | `blocked_requires_verification` | `http_challenge` | **Bot Block:** Cloudflare Bot Management challenges non-browser HTTP clients on `www.gst.gov.in/newsandupdates`. | Use **K10 Manual Import** for GST portal advisories, or subscribe via GSP (GST Suvidha Provider) official gateway. |
+| `pib_rss` | `blocked_requires_verification` | `http_challenge` | **Bot Block:** NIC Application Security Module (ASM) blocks direct feed requests to `pib.gov.in/rss/RssMain.aspx`. | Use **K10 Manual Import** for PIB MoF/MCA releases, or submit server IP for government press syndication allowlisting. |
+| `mca` | `blocked_requires_verification` | `http_challenge` | **Bot Block:** Cloudflare WAF challenge on MCA21 portal notifications page. | Use **K10 Manual Import** for Companies Act circulars, or integrate with MCA21 V3 statutory data feeds. |
+| `indiabudget` | `blocked_requires_verification` | `http_challenge` | **Bot Block:** Cloudflare WAF blocks automated downloads on `indiabudget.gov.in`. | Use **K10 Manual Import** upon annual budget presentation (upload Finance Bill and Budget Highlights PDFs). |
+| `cbic_gst` | `unreachable` | `tls` | **Network / Server TLS:** NIC web server cipher suite incompatibility during SSL handshake. | Maintain cool-down; coordinate with NIC helpdesk to support modern TLS 1.3 ciphers, or import notifications via K10. |
+| `finmin` | `unreachable` | `tcp` | **Network Firewall:** NIC Ministry of Finance gateway drops TCP SYN packets on port 443 from cloud/external IPs. | Contact Ministry of Finance IT cell for institutional IP whitelisting, or import MoF press releases via K10. |
+| `cbic_taxinfo` | `degraded` | `parser` | **Site Architecture:** Modern React SPA without server-rendered static HTML listing anchors. | Rely on K10 manual uploads for CBIC circulars while awaiting static RSS release. |
+| `mahagst` | `unreachable` | `tcp` | **Network / Site Down:** Gateway timeout on Maharashtra GST ASPX portal. | Upload Trade Circulars manually via K10. |
+
 ---
 
 ## 3. Database Data Audit (A3)

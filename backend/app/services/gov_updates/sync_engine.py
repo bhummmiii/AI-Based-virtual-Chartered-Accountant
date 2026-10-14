@@ -33,6 +33,18 @@ SOURCE_FETCH_ENDPOINTS = {
     "egazette_recent": "https://egazette.gov.in",
     "nfra_orders": "https://nfra.gov.in/orders",
     "sebi_circulars": "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=1&smid=0&ssid=0",
+    "incometax_feed": "https://www.incometaxindia.gov.in/press-release-rss-feed/-/asset_publisher/ovrx/rss",
+    "pib_rss": "https://pib.gov.in/rss/RssMain.aspx?ModId=1",
+    "gstn_news": "https://www.gst.gov.in/newsandupdates",
+    "mca": "https://www.mca.gov.in/content/mca/global/en/notifications-circulars.html",
+    "indiabudget": "https://www.indiabudget.gov.in",
+    "dor": "https://dor.gov.in/press-release",
+    "cbic_taxinfo": "https://taxinformation.cbic.gov.in",
+    "cbic_gst": "https://cbic-gst.gov.in",
+    "finmin": "https://finmin.gov.in",
+    "mahagst": "https://mahagst.gov.in",
+    "icai_idtc": "https://idtc.icai.org",
+    "gstat": "https://gstat.gov.in",
 }
 
 
