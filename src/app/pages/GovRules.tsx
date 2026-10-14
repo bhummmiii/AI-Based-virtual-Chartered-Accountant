@@ -173,14 +173,30 @@ export function GovRules() {
   };
 
   const totalPages = Math.ceil(total / pageSize) || 1;
+  const [reprobingId, setReprobingId] = useState<string | null>(null);
+  const [manualImportOpen, setManualImportOpen] = useState(false);
 
-  const formatLastSync = (isoStr?: string | null) => {
+  const formatTime = (isoStr?: string | null) => {
     if (!isoStr) return "Never";
     try {
       const d = new Date(isoStr);
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     } catch {
-      return "Recently";
+      return "Never";
+    }
+  };
+
+  const handleReprobeSource = async (sourceId: string) => {
+    setReprobingId(sourceId);
+    try {
+      const updated = await govUpdatesService.reprobeSource(sourceId);
+      setSources((prev) => prev.map((s) => (s.id === sourceId ? updated : s)));
+      await fetchMeta();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Reprobe failed";
+      alert(msg);
+    } finally {
+      setReprobingId(null);
     }
   };
 
@@ -190,12 +206,18 @@ export function GovRules() {
         title="Government Rule Engine"
         subtitle="Latest circulars, GST updates & budget highlights — explained simply"
         actions={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             {meta && (
-              <span className="text-xs text-muted-foreground mr-1">
-                Last synced {formatLastSync(meta.last_sync_at)} • {meta.sources_total} sources (
-                {meta.sources_blocked} blocked)
-              </span>
+              <div className="flex flex-col items-end text-xs text-muted-foreground mr-1">
+                <span>
+                  Last successful sync {formatTime(meta.last_sync_at)} &mdash; {meta.sources_total} sources: {meta.sources_ok} ok / {meta.sources_degraded} degraded / {meta.sources_blocked} blocked / {meta.sources_unreachable} unreachable / {meta.sources_disabled} disabled
+                </span>
+                {meta.last_attempt_at && (
+                  <span className="text-[11px] text-muted-foreground/80">
+                    Last attempt {formatTime(meta.last_attempt_at)}
+                  </span>
+                )}
+              </div>
             )}
             {isCAOrAdmin && (
               <>
@@ -642,59 +664,123 @@ export function GovRules() {
           <div className="mt-5 space-y-3">
             <div className="divide-y rounded-lg border bg-card">
               {sources.map((s) => {
-                const isBlocked = s.status === "blocked_requires_verification";
                 const isOk = s.status === "ok";
+                const isDegraded = s.status === "degraded";
+                const isBlocked = s.status === "blocked_requires_verification";
+                const isUnreachable = s.status === "unreachable";
+                const isErrorStatus = isDegraded || isBlocked || isUnreachable;
 
                 return (
-                  <div key={s.id} className="p-3.5 flex items-start justify-between gap-3 text-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-foreground">{s.name}</span>
-                        <Badge variant="outline" className="text-[10px]">
-                          Tier {s.tier}
-                        </Badge>
-                        <Badge variant="outline" className="text-[10px] uppercase">
-                          {s.method}
-                        </Badge>
+                  <div key={s.id} className="p-3.5 space-y-2 text-xs">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-foreground">{s.name}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            Tier {s.tier}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                            {s.method}
+                          </Badge>
+                        </div>
+                        <p className="text-muted-foreground font-mono text-[11px]">{s.domain}</p>
                       </div>
-                      <p className="text-muted-foreground font-mono text-[11px]">{s.domain}</p>
-                      {s.last_error && (
-                        <p className="text-destructive text-[11px] flex items-center gap-1">
-                          <AlertTriangle className="size-3 shrink-0" />
-                          {s.last_error}
-                        </p>
-                      )}
-                      {s.tos_note && <p className="text-muted-foreground text-[10px] italic">{s.tos_note}</p>}
-                    </div>
 
-                    <div className="flex flex-col items-end gap-2 shrink-0">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2 shrink-0">
                         {isOk ? (
                           <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px] gap-1">
                             <CheckCircle2 className="size-2.5" />
                             OK
+                          </Badge>
+                        ) : isDegraded ? (
+                          <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px] gap-1">
+                            <AlertTriangle className="size-2.5" />
+                            Degraded
                           </Badge>
                         ) : isBlocked ? (
                           <Badge variant="destructive" className="text-[10px] gap-1">
                             <XCircle className="size-2.5" />
                             Blocked (WAF)
                           </Badge>
+                        ) : isUnreachable ? (
+                          <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 text-[10px] gap-1">
+                            <AlertTriangle className="size-2.5" />
+                            Unreachable
+                          </Badge>
                         ) : (
                           <Badge variant="secondary" className="text-[10px]">
                             Disabled
                           </Badge>
                         )}
-                      </div>
 
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleToggleSource(s.id, s.enabled)}
-                        className="h-6 text-[11px] px-2"
-                      >
-                        {s.enabled ? "Disable" : "Enable"}
-                      </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleToggleSource(s.id, s.enabled)}
+                          className="h-6 text-[11px] px-2"
+                        >
+                          {s.enabled ? "Disable" : "Enable"}
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReprobeSource(s.id)}
+                          disabled={reprobingId === s.id}
+                          className="h-6 text-[11px] px-2 gap-1 text-muted-foreground hover:text-foreground"
+                          title="Re-probe endpoint (rate-limited 1/hr)"
+                        >
+                          <RefreshCw className={`size-3 ${reprobingId === s.id ? "animate-spin" : ""}`} />
+                          Re-probe
+                        </Button>
+                      </div>
                     </div>
+
+                    {/* Operational Details Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t text-[11px] text-muted-foreground">
+                      <div>
+                        <span className="block text-[10px] uppercase font-semibold text-muted-foreground/70">Last Attempt</span>
+                        <span>{formatTime(s.last_attempt_at)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] uppercase font-semibold text-muted-foreground/70">Last Success</span>
+                        <span>{formatTime(s.last_success_at)}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] uppercase font-semibold text-muted-foreground/70">Failures / Stage</span>
+                        <span>{s.consecutive_failures ?? 0} &bull; {s.failure_stage || "none"}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] uppercase font-semibold text-muted-foreground/70">Next Retry</span>
+                        <span>{formatTime(s.next_retry_at)}</span>
+                      </div>
+                    </div>
+
+                    {/* Red error text ONLY when degraded/blocked/unreachable */}
+                    {isErrorStatus && s.last_error && (
+                      <p className="text-destructive text-[11px] flex items-center gap-1.5 pt-0.5">
+                        <AlertTriangle className="size-3 shrink-0" />
+                        <span>{s.last_error}</span>
+                      </p>
+                    )}
+
+                    {/* Manual Import link for Blocked/Unreachable sources */}
+                    {(isBlocked || isUnreachable) && (
+                      <div className="pt-1 flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground italic">Automated sync unavailable per robots/WAF policy.</span>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={() => {
+                            setSourcesOpen(false);
+                            setManualImportOpen(true);
+                          }}
+                          className="h-auto p-0 text-primary text-[11px] font-medium"
+                        >
+                          Add circular manually &rarr;
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

@@ -40,6 +40,8 @@ def list_gov_updates(
     q: Optional[str] = Query(None, description="Full-text search query across title, text, doc number"),
     saved: bool = Query(False, description="Filter only saved bookmarks for current user"),
     include_archive: bool = Query(True, description="Include non-active/superseded updates"),
+    show_administrative: bool = Query(False, description="Show administrative/non-law items (K5)"),
+    show_hidden: bool = Query(False, description="Show hidden updates (K12)"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Page size"),
     db: Session = Depends(get_db),
@@ -60,6 +62,8 @@ def list_gov_updates(
         q=q,
         saved_only=saved,
         include_archive=include_archive,
+        show_administrative=show_administrative,
+        show_hidden=show_hidden,
         page=page,
         page_size=page_size,
     )
@@ -92,6 +96,15 @@ def toggle_gov_source(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
     return updated
+
+
+@router.post("/sources/{source_id}/reprobe", response_model=GovSourceResponse, summary="Re-probe a government source (Admin/CA, rate-limited to 1/hr)")
+def reprobe_gov_source(
+    source_id: uuid.UUID = Path(..., description="Source ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ca_role),
+):
+    return GovUpdateService.reprobe_source(db=db, source_id=source_id)
 
 
 @router.post("/sync", summary="Trigger manual sync of government updates (Admin/CA)")

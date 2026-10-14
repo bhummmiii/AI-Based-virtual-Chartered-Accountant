@@ -25,8 +25,13 @@ class GovSourceResponse(BaseModel):
     tos_note: Optional[str] = None
     crawl_delay_seconds: float
     last_run_at: Optional[datetime] = None
+    last_attempt_at: Optional[datetime] = None
     last_success_at: Optional[datetime] = None
+    consecutive_failures: int = 0
+    failure_stage: Optional[str] = None
     last_error: Optional[str] = None
+    next_retry_at: Optional[datetime] = None
+    last_probe_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -43,18 +48,27 @@ class GovUpdateResponse(BaseModel):
     doc_type: str
     legal_status: str
     doc_number: Optional[str] = None
+    doc_number_source: Optional[str] = None
     issue_date: Optional[date] = None
+    issue_date_source: Optional[str] = None
+    date_precision: str = "day"
     effective_date: Optional[date] = None
     category: str
     topics: List[str]
     law_version: Optional[str] = None
     url: str
+    link_quality: str = "direct_document"
+    ministry: Optional[str] = None
     pdf_url: Optional[str] = None
     content_text: Optional[str] = None
     text_status: str
     status: str
     status_confidence: Optional[float] = None
     supersedes_refs: List[str]
+    hidden: bool = False
+    hidden_reason: Optional[str] = None
+    is_manual: bool = False
+    manual_added_at: Optional[datetime] = None
     first_seen_at: datetime
     fetched_at: datetime
     updated_at: datetime
@@ -75,14 +89,26 @@ class GovUpdatesListResponse(BaseModel):
     facets: Dict[str, Dict[str, int]]
 
 
+class GovCategorySourceItem(BaseModel):
+    code: str
+    name: str
+    status: str
+    enabled: bool
+    last_error: Optional[str] = None
+
+
 class GovMetaResponse(BaseModel):
     category_counts: Dict[str, int]
     total_updates: int
     last_sync_at: Optional[datetime] = None
+    last_attempt_at: Optional[datetime] = None
     sources_total: int
     sources_ok: int
+    sources_degraded: int
     sources_blocked: int
+    sources_unreachable: int
     sources_disabled: int
+    category_sources: Dict[str, List[GovCategorySourceItem]] = {}
 
 
 class GovSourceToggleRequest(BaseModel):

@@ -21,6 +21,7 @@ from app.services.gov_updates.adapters.html_adapter import HtmlListingAdapter
 from app.services.gov_updates.adapters.pdf_extractor import extract_pdf_text
 from app.services.gov_updates.normalizer import GovNormalizer
 from app.services.gov_updates.ai_explainer import GovAiExplainer
+from app.services.gov_updates.status_manager import record_source_attempt, is_source_fetchable
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class GovSyncEngine:
     def sync_source(self, db: Session, source_code: str, backfilled: bool = False, fetch_pdfs: bool = True) -> Dict[str, Any]:
         """
         Synchronizes a single source. Isolated from other sources.
+        Enforces K1: Blocked/unreachable/disabled or cooldown sources are never fetched.
         """
         source = db.query(GovSource).filter(GovSource.code == source_code).first()
         if not source:
@@ -50,24 +52,14 @@ class GovSyncEngine:
 
         now = datetime.now(timezone.utc)
 
-        # R6 Check: if blocked_requires_verification, check 24h cool down
-        if source.status == "blocked_requires_verification":
-            if source.last_run_at and (now - source.last_run_at).total_seconds() < 86400:
-                logger.info(f"Source {source.code} is blocked_requires_verification. Skipping within 24h cooldown.")
-                return {
-                    "source": source.code,
-                    "status": "blocked",
-                    "reason": "Source requires manual verification after WAF/bot challenge. 24h cooldown active.",
-                    "items_new": 0,
-                    "items_updated": 0,
-                    "items_skipped": 0,
-                }
-
-        if not source.enabled:
-            logger.info(f"Source {source.code} is disabled. Skipping.")
+        # K1 Enforcement: check eligibility and cooldown
+        if not is_source_fetchable(source, now):
+            logger.info(f"Source {source.code} not eligible for fetch (status={source.status}, next_retry={source.next_retry_at}, enabled={source.enabled}).")
             return {
                 "source": source.code,
-                "status": "disabled",
+                "status": source.status,
+                "skipped": True,
+                "reason": f"Source {source.code} is {source.status} (enabled={source.enabled}) and in cooldown until {source.next_retry_at}.",
                 "items_new": 0,
                 "items_updated": 0,
                 "items_skipped": 0,
@@ -82,7 +74,6 @@ class GovSyncEngine:
         db.add(fetch_run)
         db.commit()
 
-        source.last_run_at = now
         target_url = SOURCE_FETCH_ENDPOINTS.get(source.code, source.base_url)
 
         try:
@@ -93,9 +84,14 @@ class GovSyncEngine:
 
             # Check if blocked by WAF/CAPTCHA (R6)
             if result.blocked:
-                source.status = "blocked_requires_verification"
-                source.captcha_detected = True
-                source.last_error = result.block_reason
+                record_source_attempt(
+                    source=source,
+                    success=False,
+                    now=datetime.now(timezone.utc),
+                    failure_stage="http_challenge",
+                    error_message=result.block_reason,
+                    is_blocked=True,
+                )
                 fetch_run.status = "blocked"
                 fetch_run.error_message = result.block_reason
                 fetch_run.finished_at = datetime.now(timezone.utc)
@@ -111,14 +107,21 @@ class GovSyncEngine:
 
             if not result.is_success and not result.not_modified:
                 err_msg = result.error or f"HTTP {result.status_code}"
-                source.last_error = err_msg
+                f_stage = "tcp" if "timeout" in err_msg.lower() else "network"
+                record_source_attempt(
+                    source=source,
+                    success=False,
+                    now=datetime.now(timezone.utc),
+                    failure_stage=f_stage,
+                    error_message=err_msg,
+                )
                 fetch_run.status = "failed"
                 fetch_run.error_message = err_msg
                 fetch_run.finished_at = datetime.now(timezone.utc)
                 db.commit()
                 return {
                     "source": source.code,
-                    "status": "failed",
+                    "status": source.status,
                     "error": err_msg,
                     "items_new": 0,
                     "items_updated": 0,
@@ -127,7 +130,7 @@ class GovSyncEngine:
 
             # 304 Not Modified
             if result.not_modified:
-                source.last_success_at = datetime.now(timezone.utc)
+                record_source_attempt(source=source, success=True, now=datetime.now(timezone.utc))
                 fetch_run.status = "success"
                 fetch_run.finished_at = datetime.now(timezone.utc)
                 db.commit()
@@ -252,9 +255,7 @@ class GovSyncEngine:
 
             # Update Source & Fetch Run
             finish_time = datetime.now(timezone.utc)
-            source.status = "ok"
-            source.last_success_at = finish_time
-            source.last_error = None
+            record_source_attempt(source=source, success=True, now=finish_time, items_count=items_new)
 
             fetch_run.status = "success"
             fetch_run.items_new = items_new
@@ -275,7 +276,13 @@ class GovSyncEngine:
         except Exception as e:
             logger.error(f"Error syncing source {source.code}: {e}", exc_info=True)
             db.rollback()
-            source.last_error = str(e)
+            record_source_attempt(
+                source=source,
+                success=False,
+                now=datetime.now(timezone.utc),
+                failure_stage="exception",
+                error_message=str(e),
+            )
             fetch_run.status = "failed"
             fetch_run.error_message = str(e)
             fetch_run.finished_at = datetime.now(timezone.utc)
@@ -291,11 +298,13 @@ class GovSyncEngine:
 
     def sync_all(self, db: Session, backfilled: bool = False) -> List[Dict[str, Any]]:
         """
-        Synchronizes all enabled sources sequentially with isolation.
+        Synchronizes all eligible sources sequentially with isolation per K1.
+        Only fetches enabled sources whose status is ok or degraded and past cool-down.
         """
-        enabled_sources = db.query(GovSource).filter(GovSource.enabled == True).all()
+        now = datetime.now(timezone.utc)
+        fetchable_sources = [s for s in db.query(GovSource).all() if is_source_fetchable(s, now)]
         results = []
-        for s in enabled_sources:
+        for s in fetchable_sources:
             try:
                 res = self.sync_source(db, s.code, backfilled=backfilled)
                 results.append(res)

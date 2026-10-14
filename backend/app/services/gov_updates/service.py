@@ -37,10 +37,19 @@ class GovUpdateService:
         q: Optional[str] = None,
         saved_only: bool = False,
         include_archive: bool = True,
+        show_administrative: bool = False,
+        show_hidden: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> GovUpdatesListResponse:
         query = db.query(GovUpdate).join(GovSource)
+
+        # Hidden & Administrative filtering (K5 & K12)
+        if not show_hidden:
+            query = query.filter(GovUpdate.hidden == False)
+
+        if not show_administrative:
+            query = query.filter(GovUpdate.legal_status != "administrative_not_law")
 
         # Filters
         if category and category.upper() != "ALL":
@@ -107,20 +116,23 @@ class GovUpdateService:
         offset = (page - 1) * page_size
         updates = query.offset(offset).limit(page_size).all()
 
-        now = datetime.now(timezone.utc)
-        seven_days_ago = now - timedelta(days=7)
+        now_dt = datetime.now(timezone.utc)
+        cutoff_14d_dt = now_dt - timedelta(days=14)
+        cutoff_14d_date = now_dt.date() - timedelta(days=14)
 
-        def check_is_new(dt: Optional[datetime], backfilled: bool) -> bool:
-            if not dt or backfilled:
+        # K8 Rule: New = issue_date known AND issue_date within 14d AND first_seen_at within 14d AND not backfilled
+        def check_is_new(issue_dt: Optional[date], seen_dt: Optional[datetime], backfilled: bool) -> bool:
+            if not issue_dt or not seen_dt or backfilled:
                 return False
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt >= seven_days_ago
+            if issue_dt < cutoff_14d_date:
+                return False
+            if seen_dt.tzinfo is None:
+                seen_dt = seen_dt.replace(tzinfo=timezone.utc)
+            return seen_dt >= cutoff_14d_dt
 
         items_res: List[GovUpdateResponse] = []
         for u in updates:
-            # is_new: first seen within last 7 days and not backfilled
-            is_new = check_is_new(u.first_seen_at, bool(u.backfilled))
+            is_new = check_is_new(u.issue_date, u.first_seen_at, bool(u.backfilled))
             is_saved = u.id in saved_ids_set
 
             items_res.append(
@@ -134,18 +146,27 @@ class GovUpdateService:
                     doc_type=u.doc_type,
                     legal_status=u.legal_status,
                     doc_number=u.doc_number,
+                    doc_number_source=u.doc_number_source,
                     issue_date=u.issue_date,
+                    issue_date_source=u.issue_date_source,
+                    date_precision=u.date_precision or "day",
                     effective_date=u.effective_date,
                     category=u.category,
                     topics=u.topics or [],
                     law_version=u.law_version,
                     url=u.url,
+                    link_quality=u.link_quality or "direct_document",
+                    ministry=u.ministry,
                     pdf_url=u.pdf_url,
                     content_text=u.content_text,
                     text_status=u.text_status,
                     status=u.status,
                     status_confidence=u.status_confidence,
                     supersedes_refs=u.supersedes_refs or [],
+                    hidden=bool(u.hidden),
+                    hidden_reason=u.hidden_reason,
+                    is_manual=bool(u.is_manual),
+                    manual_added_at=u.manual_added_at,
                     first_seen_at=u.first_seen_at,
                     fetched_at=u.fetched_at,
                     updated_at=u.updated_at,
@@ -206,13 +227,16 @@ class GovUpdateService:
             .first()
             is not None
         )
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        now_dt = datetime.now(timezone.utc)
+        cutoff_14d_dt = now_dt - timedelta(days=14)
+        cutoff_14d_date = now_dt.date() - timedelta(days=14)
+
         is_new = False
-        if u.first_seen_at and not u.backfilled:
+        if u.issue_date and u.first_seen_at and not u.backfilled and u.issue_date >= cutoff_14d_date:
             seen_dt = u.first_seen_at
             if seen_dt.tzinfo is None:
                 seen_dt = seen_dt.replace(tzinfo=timezone.utc)
-            is_new = seen_dt >= seven_days_ago
+            is_new = seen_dt >= cutoff_14d_dt
 
         return GovUpdateResponse(
             id=u.id,
@@ -224,18 +248,27 @@ class GovUpdateService:
             doc_type=u.doc_type,
             legal_status=u.legal_status,
             doc_number=u.doc_number,
+            doc_number_source=u.doc_number_source,
             issue_date=u.issue_date,
+            issue_date_source=u.issue_date_source,
+            date_precision=u.date_precision or "day",
             effective_date=u.effective_date,
             category=u.category,
             topics=u.topics or [],
             law_version=u.law_version,
             url=u.url,
+            link_quality=u.link_quality or "direct_document",
+            ministry=u.ministry,
             pdf_url=u.pdf_url,
             content_text=u.content_text,
             text_status=u.text_status,
             status=u.status,
             status_confidence=u.status_confidence,
             supersedes_refs=u.supersedes_refs or [],
+            hidden=bool(u.hidden),
+            hidden_reason=u.hidden_reason,
+            is_manual=bool(u.is_manual),
+            manual_added_at=u.manual_added_at,
             first_seen_at=u.first_seen_at,
             fetched_at=u.fetched_at,
             updated_at=u.updated_at,
@@ -277,28 +310,63 @@ class GovUpdateService:
 
     @classmethod
     def get_meta(cls, db: Session) -> GovMetaResponse:
+        from app.schemas.government_update import GovCategorySourceItem
+
         cat_counts = dict(
             db.query(GovUpdate.category, func.count(GovUpdate.id))
+            .filter(GovUpdate.hidden == False)
             .group_by(GovUpdate.category)
             .all()
         )
-        total_updates = db.query(GovUpdate).count()
+        total_updates = db.query(GovUpdate).filter(GovUpdate.hidden == False).count()
 
-        last_sync = db.query(func.max(GovSource.last_success_at)).scalar()
+        sources = db.query(GovSource).all()
+        total_sources = len(sources)
+        sources_ok = sum(1 for s in sources if s.status == "ok")
+        sources_degraded = sum(1 for s in sources if s.status == "degraded")
+        sources_blocked = sum(1 for s in sources if s.status == "blocked_requires_verification")
+        sources_unreachable = sum(1 for s in sources if s.status == "unreachable")
+        sources_disabled = sum(1 for s in sources if s.status == "disabled")
 
-        total_sources = db.query(GovSource).count()
-        sources_ok = db.query(GovSource).filter(GovSource.status == "ok").count()
-        sources_blocked = db.query(GovSource).filter(GovSource.status == "blocked_requires_verification").count()
-        sources_disabled = db.query(GovSource).filter(GovSource.status == "disabled").count()
+        last_sync = max((s.last_success_at for s in sources if s.last_success_at), default=None)
+        last_attempt = max((s.last_attempt_at for s in sources if s.last_attempt_at), default=None)
+
+        CATEGORY_SOURCE_MAPPING = {
+            "GST": ["gstcouncil", "cbic_gst", "cbic_taxinfo", "gstn_news", "mahagst", "icai_idtc", "gstat"],
+            "INCOME_TAX": ["incometax_feed", "dor", "incometax_press_rss"],
+            "BUDGET": ["indiabudget", "finmin", "dor"],
+            "ACCOUNTING": ["icai_announcements", "nfra_orders", "icai_accounting_std"],
+            "BANKING": ["rbi_notifications", "rbi_pressreleases"],
+            "CORPORATE_LAW": ["mca", "sebi_circulars"],
+        }
+        source_by_code = {s.code: s for s in sources}
+        category_sources_map = {}
+        for cat, codes in CATEGORY_SOURCE_MAPPING.items():
+            cat_list = []
+            for c in codes:
+                if c in source_by_code:
+                    src_obj = source_by_code[c]
+                    cat_list.append(GovCategorySourceItem(
+                        code=src_obj.code,
+                        name=src_obj.name,
+                        status=src_obj.status,
+                        enabled=src_obj.enabled,
+                        last_error=src_obj.last_error if src_obj.status != "ok" else None,
+                    ))
+            category_sources_map[cat] = cat_list
 
         return GovMetaResponse(
             category_counts=cat_counts,
             total_updates=total_updates,
             last_sync_at=last_sync,
+            last_attempt_at=last_attempt,
             sources_total=total_sources,
             sources_ok=sources_ok,
+            sources_degraded=sources_degraded,
             sources_blocked=sources_blocked,
+            sources_unreachable=sources_unreachable,
             sources_disabled=sources_disabled,
+            category_sources=category_sources_map,
         )
 
     @classmethod
@@ -312,11 +380,48 @@ class GovUpdateService:
         if not source:
             return None
         source.enabled = enabled
-        if not enabled:
-            source.status = "disabled"
-        elif source.status == "disabled":
-            source.status = "ok"
         source.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(source)
+        return GovSourceResponse.model_validate(source)
+
+    @classmethod
+    def reprobe_source(cls, db: Session, source_id: uuid.UUID) -> GovSourceResponse:
+        from fastapi import HTTPException
+        source = db.query(GovSource).filter(GovSource.id == source_id).first()
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+        now = datetime.now(timezone.utc)
+        if source.last_probe_at and (now - source.last_probe_at).total_seconds() < 3600:
+            remaining = int((3600 - (now - source.last_probe_at).total_seconds()) / 60)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Re-probe rate-limited. Please wait {remaining} minutes before re-probing {source.name}."
+            )
+
+        from scripts.gov_source_diagnose import diagnose_source
+        src_dict = {
+            "code": source.code,
+            "name": source.name,
+            "url": source.base_url,
+            "base_url": source.base_url,
+        }
+        diag = diagnose_source(src_dict)
+
+        from app.services.gov_updates.status_manager import record_source_attempt
+        source.last_probe_at = now
+        if diag["classification"] == "ok":
+            record_source_attempt(source, success=True, now=now)
+        else:
+            record_source_attempt(
+                source,
+                success=False,
+                now=now,
+                failure_stage=diag.get("failure_stage"),
+                error_message=diag.get("error_detail"),
+                is_blocked=diag.get("is_bot_blocked", False),
+            )
         db.commit()
         db.refresh(source)
         return GovSourceResponse.model_validate(source)

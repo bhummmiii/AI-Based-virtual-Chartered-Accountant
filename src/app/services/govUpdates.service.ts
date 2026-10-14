@@ -11,14 +11,19 @@ export interface GovSource {
   state_code?: string | null;
   method: string;
   enabled: boolean;
-  status: "ok" | "degraded" | "blocked_requires_verification" | "disabled";
+  status: "ok" | "degraded" | "blocked_requires_verification" | "unreachable" | "disabled";
   robots_ok: boolean;
   captcha_detected: boolean;
   tos_note?: string | null;
   crawl_delay_seconds: number;
   last_run_at?: string | null;
+  last_attempt_at?: string | null;
   last_success_at?: string | null;
+  consecutive_failures?: number;
+  failure_stage?: string | null;
   last_error?: string | null;
+  next_retry_at?: string | null;
+  last_probe_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,18 +46,27 @@ export interface GovUpdate {
   doc_type: string;
   legal_status: string;
   doc_number?: string | null;
+  doc_number_source?: string | null;
   issue_date?: string | null;
+  issue_date_source?: string | null;
+  date_precision?: string;
   effective_date?: string | null;
   category: string;
   topics: string[];
   law_version?: string | null;
   url: string;
+  link_quality?: string;
+  ministry?: string | null;
   pdf_url?: string | null;
   content_text?: string | null;
   text_status: string;
   status: string;
   status_confidence?: number | null;
   supersedes_refs: string[];
+  hidden?: boolean;
+  hidden_reason?: string | null;
+  is_manual?: boolean;
+  manual_added_at?: string | null;
   first_seen_at: string;
   fetched_at: string;
   updated_at: string;
@@ -76,14 +90,26 @@ export interface GovUpdatesListResponse {
   };
 }
 
+export interface GovCategorySourceItem {
+  code: string;
+  name: string;
+  status: string;
+  enabled: boolean;
+  last_error?: string | null;
+}
+
 export interface GovMetaResponse {
   category_counts: Record<string, number>;
   total_updates: number;
   last_sync_at?: string | null;
+  last_attempt_at?: string | null;
   sources_total: number;
   sources_ok: number;
+  sources_degraded: number;
   sources_blocked: number;
+  sources_unreachable: number;
   sources_disabled: number;
+  category_sources?: Record<string, GovCategorySourceItem[]>;
 }
 
 export interface GovUpdatesFilterParams {
@@ -99,6 +125,8 @@ export interface GovUpdatesFilterParams {
   q?: string;
   saved?: boolean;
   include_archive?: boolean;
+  show_administrative?: boolean;
+  show_hidden?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -118,6 +146,8 @@ export const govUpdatesService = {
     if (params.q) searchParams.set("q", params.q);
     if (params.saved) searchParams.set("saved", "true");
     if (params.include_archive !== undefined) searchParams.set("include_archive", String(params.include_archive));
+    if (params.show_administrative !== undefined) searchParams.set("show_administrative", String(params.show_administrative));
+    if (params.show_hidden !== undefined) searchParams.set("show_hidden", String(params.show_hidden));
     if (params.page) searchParams.set("page", String(params.page));
     if (params.page_size) searchParams.set("page_size", String(params.page_size));
 
@@ -147,6 +177,16 @@ export const govUpdatesService = {
 
   async toggleSource(id: string, enabled: boolean): Promise<GovSource> {
     return api.patch<GovSource>(`/gov-updates/sources/${id}`, { enabled });
+  },
+
+  async reprobeSource(id: string): Promise<GovSource> {
+    return api.post<GovSource>(`/gov-updates/sources/${id}/reprobe`, {});
+  },
+
+  async manualImport(formData: FormData): Promise<GovUpdate> {
+    return api.post<GovUpdate>("/gov-updates/manual-import", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
   },
 
   async triggerSync(source_code?: string, backfill: boolean = false): Promise<unknown> {
