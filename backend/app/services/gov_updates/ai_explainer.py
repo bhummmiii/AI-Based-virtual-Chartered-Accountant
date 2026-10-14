@@ -97,8 +97,8 @@ class GovAiExplainer:
         Returns (ai_summary_dict, ai_status).
         ai_status can be: 'generated', 'rejected_ungrounded', 'failed', 'no_text'
         """
-        if text_status != "ok" or not content_text or len(content_text.strip()) < 50:
-            return None, "no_text"
+        if text_status != "ok" or not content_text or len(content_text.strip()) < 80:
+            return None, "none"
 
         api_key = self.settings.GEMINI_API_KEY
         if not api_key:
@@ -109,6 +109,8 @@ class GovAiExplainer:
 Analyze ONLY the provided official text below and generate a plain-language summary in strictly valid JSON format.
 DO NOT use any external knowledge. DO NOT invent or hallucinate any dates, numbers, turnover limits, or rates.
 Every number, rate, and date in your response MUST appear verbatim in the source text.
+DO NOT interpret standard publication terms (for example, "Extraordinary" in "Extraordinary Gazette" means a special gazette publication issue, NOT extraordinary circumstances).
+If the text is only a title or metadata without substantive circular content, do not summarize.
 
 Source Text:
 \"\"\"

@@ -40,12 +40,9 @@ def extract_pdf_text(pdf_bytes: bytes, max_pages: int = 50) -> Tuple[str, str]:
 
         full_text = "\n\n".join(extracted_pages).strip()
 
-        # Check if the extracted text contains meaningful characters (not scanned image)
-        alphanumeric_count = len(re.findall(r"[A-Za-z0-9]", full_text))
-        if alphanumeric_count < 50:
-            return "", "no_text"
-
-        return full_text, "ok"
+        from app.services.gov_updates.text_quality import evaluate_and_clean_document_text
+        cleaned_text, status = evaluate_and_clean_document_text(full_text)
+        return cleaned_text, status
 
     except Exception:
         return "", "no_text"

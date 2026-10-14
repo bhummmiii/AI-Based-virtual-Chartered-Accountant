@@ -116,25 +116,35 @@ def test_rss_adapter_parsing():
     items = RssAdapter.parse(xml, "rbi_notifications")
     assert len(items) == 2
     assert "Risk Management" in items[0].title
-    assert items[0].doc_number == "RBI-ID-13738"
+    # K4: No synthesis from URL query parameters (e.g. Id=13738)
+    assert items[0].doc_number is None
     assert items[0].issue_date == date(2026, 10, 10)
     assert items[0].text_status == "ok"
 
 
 def test_date_parsing_never_guesses_today():
-    # If a date cannot be parsed, return None. NEVER today's date!
-    res1 = parse_date_strict("Undated Circular without any timestamp")
+    # K3: If a date cannot be parsed, return (None, "none"). NEVER today's date!
+    res1, prec1 = parse_date_strict("Undated Circular without any timestamp")
     assert res1 is None
+    assert prec1 == "none"
 
-    res2 = parse_date_strict("Invalid date 99-99-9999")
+    res2, prec2 = parse_date_strict("Invalid date 99-99-9999")
     assert res2 is None
+    assert prec2 == "none"
 
-    # Valid dates
-    res3 = parse_date_strict("Notice published on 12-Oct-2026")
+    # Valid dates with day precision
+    res3, prec3 = parse_date_strict("Notice published on 12-Oct-2026")
     assert res3 == date(2026, 10, 12)
+    assert prec3 == "day"
 
-    res4 = parse_date_strict("Published Oct 08, 2026")
+    res4, prec4 = parse_date_strict("Published Oct 08, 2026")
     assert res4 == date(2026, 10, 8)
+    assert prec4 == "day"
+
+    # Month-only precision
+    res5, prec5 = parse_date_strict("GST Council Newsletter December 2025")
+    assert res5 == date(2025, 12, 1)
+    assert prec5 == "month"
 
 
 def test_html_adapter_gstcouncil():
@@ -145,7 +155,8 @@ def test_html_adapter_gstcouncil():
     items = HtmlListingAdapter.parse("gstcouncil", html, "https://gstcouncil.gov.in")
     assert len(items) == 2
     assert "57th Meeting of the GST Council" in items[0].title
-    assert items[0].doc_number == "GSTC-57TH"
+    # K4: NEVER synthesize #GSTC-57TH when not verbatim in doc
+    assert items[0].doc_number is None
     assert items[0].pdf_url == "https://gstcouncil.gov.in/sites/default/files/2026-10/press_release_0.pdf"
 
 
@@ -166,7 +177,9 @@ def test_html_adapter_egazette():
         html = f.read()
 
     items = HtmlListingAdapter.parse("egazette_recent", html, "https://egazette.gov.in")
-    assert len(items) == 2
+    # K6: Ministry of Finance accepted, Ministry of Defence rejected
+    assert len(items) == 1
+    assert items[0].ministry == "Ministry of Finance"
     assert items[0].doc_number == "CG-DL-E-12102026-277060"
     assert items[0].issue_date == date(2026, 10, 12)
 
@@ -516,3 +529,153 @@ def test_empty_state_honest_message(db_session, mock_users):
     assert len(res.items) == 0
     meta = GovUpdateService.get_meta(db_session)
     assert meta.total_updates == 0
+
+
+# ── K1 to K12 Comprehensive Tests ─────────────────────────────────────────────
+
+def test_source_status_transitions_and_cooldown(db_session):
+    from app.services.gov_updates.sync_engine import is_source_fetchable, record_source_attempt
+    from datetime import datetime, timezone, timedelta
+
+    source = GovSource(
+        code="test_waf_source",
+        name="Test WAF Source",
+        base_url="https://waf.gov.in",
+        domain="waf.gov.in",
+        method="html_listing",
+        enabled=True,
+        status="ok",
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    now = datetime(2026, 10, 14, 12, 0, 0, tzinfo=timezone.utc)
+    assert is_source_fetchable(source, now) is True
+
+    # Transition to blocked on WAF 403 challenge
+    record_source_attempt(
+        source=source,
+        success=False,
+        now=now,
+        failure_stage="http_challenge",
+        error_message="HTTP 403 WAF bot challenge detected",
+        is_blocked=True,
+    )
+    assert source.status == "blocked_requires_verification"
+    assert source.next_retry_at == now + timedelta(hours=24)
+    assert source.last_error == "HTTP 403 WAF bot challenge detected"
+
+    # Within 24h cool-down, source is in cooldown
+    assert (now + timedelta(hours=12)) < source.next_retry_at
+    # Sync engine NEVER fetches blocked sources automatically
+    assert is_source_fetchable(source, now + timedelta(hours=25)) is False
+
+    # After 24h cool-down, cooldown expires for reprobe
+    assert (now + timedelta(hours=25)) >= source.next_retry_at
+
+    # If reprobe succeeds, source transitions back to 'ok' and becomes fetchable
+    record_source_attempt(source=source, success=True, now=now + timedelta(hours=25))
+    assert source.status == "ok"
+    assert is_source_fetchable(source, now + timedelta(hours=25)) is True
+
+
+def test_doc_number_provenance_rejects_synthesized():
+    raw_item = RawUpdateItem(
+        title="Press Release on Trade Data",
+        url="https://gstcouncil.gov.in/meeting",
+        doc_number="#GSTC-57TH",
+        doc_number_source="synthesized",
+        issue_date=date(2026, 10, 8),
+        content_text="Detailed trade statistics released.",
+    )
+    norm = GovNormalizer.normalize_item(raw_item, source_code="gstcouncil")
+    # K4: '#GSTC-57TH' does not occur in title or text, must be nulled
+    assert norm["doc_number"] is None
+    assert norm["doc_number_source"] is None
+
+
+def test_text_quality_scoring_and_letter_spaced_repair():
+    from app.services.gov_updates.text_quality import score_text_quality, repair_letter_spaced_text
+
+    # Letter-spaced text from real newsletter artifact
+    letter_spaced = "M E S S A G E   T h e   F i f t h   N a t i o n a l   C o o r d i n a t i o n"
+    score1 = score_text_quality(letter_spaced)
+    assert score1["is_letter_spaced"] is True
+
+    repaired = repair_letter_spaced_text(letter_spaced)
+    assert "MESSAGE The Fifth National Coordination" in repaired
+    score2 = score_text_quality(repaired)
+    assert score2["is_letter_spaced"] is False
+    assert score2["single_char_ratio"] == 0.0
+
+
+def test_14_day_rule_and_backfill(db_session, mock_users):
+    ca_user, _ = mock_users
+    source = GovSource(code="s_backfill", name="S Backfill", base_url="https://s.org", domain="s.org", method="rss", enabled=True)
+    db_session.add(source)
+    db_session.commit()
+
+    # Fresh update within 14 days of 2026-10-14
+    fresh_update = GovUpdate(
+        source_id=source.id,
+        title="Recent Statutory Notification",
+        issue_date=date(2026, 10, 10),
+        first_seen_at=datetime(2026, 10, 10, 10, 0, 0, tzinfo=timezone.utc),
+        backfilled=False,
+        category="GST",
+        url="https://s.org/fresh",
+        content_hash="fresh_hash",
+        status="active",
+    )
+    # Old update (older than 14 days)
+    old_update = GovUpdate(
+        source_id=source.id,
+        title="Old Statutory Circular",
+        issue_date=date(2026, 8, 1),
+        first_seen_at=datetime(2026, 8, 1, 10, 0, 0, tzinfo=timezone.utc),
+        backfilled=True,
+        category="GST",
+        url="https://s.org/old",
+        content_hash="old_hash",
+        status="active",
+    )
+    db_session.add_all([fresh_update, old_update])
+    db_session.commit()
+
+    res = GovUpdateService.list_updates(db_session, ca_user)
+    fresh_card = next(u for u in res.items if u.title == "Recent Statutory Notification")
+    old_card = next(u for u in res.items if u.title == "Old Statutory Circular")
+
+    assert fresh_card.is_new is True
+    assert old_card.is_new is False
+
+
+def test_administrative_keywords_and_hidden(db_session, mock_users):
+    ca_user, _ = mock_users
+    source = GovSource(code="s_admin", name="S Admin", base_url="https://s.org", domain="s.org", method="html_listing", enabled=True)
+    db_session.add(source)
+    db_session.commit()
+
+    admin_update = GovUpdate(
+        source_id=source.id,
+        title="Vacancy for Consultant (Grade-1) in GST Council",
+        doc_type="recruitment_or_tender",
+        legal_status="administrative_not_law",
+        hidden=True,
+        hidden_reason="administrative_keyword:vacancy",
+        category="GST",
+        url="https://s.org/vacancy",
+        content_hash="admin_hash",
+        status="active",
+    )
+    db_session.add(admin_update)
+    db_session.commit()
+
+    # Normal list hides administrative items by default
+    res = GovUpdateService.list_updates(db_session, ca_user, show_administrative=False)
+    assert not any(u.title == admin_update.title for u in res.items)
+
+    # When show_administrative=True, it is included
+    res_admin = GovUpdateService.list_updates(db_session, ca_user, show_administrative=True)
+    assert any(u.title == admin_update.title for u in res_admin.items)
+

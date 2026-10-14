@@ -16,6 +16,7 @@ import {
   Database,
   CheckCircle2,
   XCircle,
+  Upload,
 } from "lucide-react";
 import { PageHeader } from "../components/common/PageHeader";
 import { StatusBadge } from "../components/common/StatusBadge";
@@ -38,12 +39,14 @@ import {
   GovMetaResponse,
 } from "../services/govUpdates.service";
 import { getStoredUser } from "../services/auth.service";
+import { ManualImportModal } from "../components/gov_updates/ManualImportModal";
 
 export function GovRules() {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
   const [docTypeFilter, setDocTypeFilter] = useState("");
   const [lawVersionFilter, setLawVersionFilter] = useState("");
+  const [showAdministrative, setShowAdministrative] = useState(false);
   const [includeArchive, setIncludeArchive] = useState(true);
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -56,12 +59,55 @@ export function GovRules() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Drawers
+  // Drawers & Modals
   const [selectedUpdate, setSelectedUpdate] = useState<GovUpdate | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
 
   const user = getStoredUser();
   const isCAOrAdmin = user.role === "ca" || user.role === "admin";
+
+  const renderIssueDate = (issueDate?: string | null, precision?: string) => {
+    if (!issueDate) return "Date not stated";
+    if (precision === "month") {
+      try {
+        const [y, m] = issueDate.split("-");
+        const d = new Date(parseInt(y, 10), parseInt(m, 10) - 1, 1);
+        return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      } catch {
+        return issueDate;
+      }
+    }
+    return issueDate;
+  };
+
+  const formatTitleCase = (val?: string | null) => {
+    if (!val || val.toLowerCase() === "unknown" || val.toLowerCase() === "other") return "";
+    return val
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const formatLegalStatus = (val?: string | null) => {
+    if (!val || val === "unknown") return "";
+    switch (val) {
+      case "operative_instrument":
+        return "Operative";
+      case "press_release_not_law":
+        return "Press Release — Not Law";
+      case "administrative_not_law":
+        return "Administrative";
+      case "explanatory":
+        return "Explanatory";
+      case "newsletter":
+        return "Newsletter";
+      case "draft_or_proposal":
+        return "Draft Proposal";
+      case "advisory":
+        return "Advisory";
+      default:
+        return formatTitleCase(val);
+    }
+  };
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -101,6 +147,7 @@ export function GovRules() {
         doc_type: docTypeFilter || undefined,
         law_version: lawVersionFilter || undefined,
         include_archive: includeArchive,
+        show_administrative: showAdministrative,
         q: q.trim() || undefined,
         page,
         page_size: pageSize,
@@ -115,7 +162,7 @@ export function GovRules() {
     } finally {
       setLoading(false);
     }
-  }, [tab, docTypeFilter, lawVersionFilter, includeArchive, q, page]);
+  }, [tab, docTypeFilter, lawVersionFilter, includeArchive, showAdministrative, q, page]);
 
   useEffect(() => {
     fetchMeta();
@@ -234,6 +281,15 @@ export function GovRules() {
                   Sources
                 </Button>
                 <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setManualImportOpen(true)}
+                  className="gap-1.5"
+                >
+                  <Upload className="size-3.5" />
+                  Import circular
+                </Button>
+                <Button
                   variant="default"
                   size="sm"
                   onClick={handleSyncNow}
@@ -323,18 +379,33 @@ export function GovRules() {
           </select>
         </div>
 
-        <label className="ml-auto flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
-          <input
-            type="checkbox"
-            checked={includeArchive}
-            onChange={(e) => {
-              setIncludeArchive(e.target.checked);
-              setPage(1);
-            }}
-            className="rounded border-border"
-          />
-          Include archive / superseded
-        </label>
+        <div className="ml-auto flex items-center gap-4">
+          <label className="flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
+            <input
+              type="checkbox"
+              checked={showAdministrative}
+              onChange={(e) => {
+                setShowAdministrative(e.target.checked);
+                setPage(1);
+              }}
+              className="rounded border-border"
+            />
+            Show administrative items
+          </label>
+
+          <label className="flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground">
+            <input
+              type="checkbox"
+              checked={includeArchive}
+              onChange={(e) => {
+                setIncludeArchive(e.target.checked);
+                setPage(1);
+              }}
+              className="rounded border-border"
+            />
+            Include archive / superseded
+          </label>
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -353,24 +424,109 @@ export function GovRules() {
         </Card>
       ) : updates.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            {total === 0 && !q && tab === "all" ? (
-              <div className="space-y-3">
-                <FileText className="mx-auto size-10 opacity-30" />
-                <p className="text-base font-medium">No updates synced yet</p>
-                <p className="text-xs max-w-sm mx-auto">
-                  Click &ldquo;Sync now&rdquo; above to ingest live circulars, notifications, and gazettes from official sources.
-                </p>
-                {isCAOrAdmin && (
-                  <Button size="sm" onClick={handleSyncNow} disabled={syncing} className="gap-1.5">
-                    <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
-                    Sync now
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <p>No notifications match your filters.</p>
-            )}
+          <CardContent className="py-12 text-center text-muted-foreground">
+            {(() => {
+              const catKey =
+                tab === "gst"
+                  ? "GST"
+                  : tab === "income"
+                  ? "INCOME_TAX"
+                  : tab === "budget"
+                  ? "BUDGET"
+                  : tab === "accounting"
+                  ? "ACCOUNTING"
+                  : null;
+
+              const catSources = catKey && meta?.category_sources ? meta.category_sources[catKey] || [] : [];
+              const hasOkSource = catSources.some((s) => s.status === "ok");
+
+              if (catKey && catSources.length > 0 && !hasOkSource) {
+                const categoryLabel =
+                  tab === "income"
+                    ? "Income Tax"
+                    : tab === "budget"
+                    ? "Budget"
+                    : tab === "accounting"
+                    ? "Accounting"
+                    : tab.toUpperCase();
+
+                return (
+                  <div className="space-y-4 max-w-lg mx-auto text-center py-4">
+                    <AlertTriangle className="mx-auto size-10 text-amber-500 opacity-80" />
+                    <div>
+                      <h3 className="text-base font-semibold text-foreground">
+                        No source is currently available for {categoryLabel} &mdash; {catSources.length} source(s) blocked or unreachable
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+                        Automated crawling is restricted by official web application firewalls (WAF HTTP 403) or experiencing network timeouts. Use manual import to add official circulars.
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border bg-muted/40 p-3 text-left space-y-2 text-xs">
+                      {catSources.map((cs) => (
+                        <div key={cs.code} className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-foreground">{cs.name}</span>
+                          <Badge
+                            variant={cs.status === "blocked_requires_verification" ? "destructive" : "secondary"}
+                            className="text-[10px]"
+                          >
+                            {cs.status === "blocked_requires_verification"
+                              ? "Blocked (WAF)"
+                              : cs.status === "unreachable"
+                              ? "Unreachable"
+                              : cs.status}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-center gap-3 pt-2">
+                      {isCAOrAdmin && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => setManualImportOpen(true)}
+                          className="gap-1.5"
+                        >
+                          <FileText className="size-3.5" />
+                          Add official circular manually
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          fetchSources();
+                          setSourcesOpen(true);
+                        }}
+                      >
+                        Open Sources
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (total === 0 && !q && tab === "all") {
+                return (
+                  <div className="space-y-3 py-4">
+                    <FileText className="mx-auto size-10 opacity-30" />
+                    <p className="text-base font-medium">No updates synced yet</p>
+                    <p className="text-xs max-w-sm mx-auto">
+                      Click &ldquo;Sync now&rdquo; above to ingest live circulars, notifications, and gazettes from official sources.
+                    </p>
+                    {isCAOrAdmin && (
+                      <Button size="sm" onClick={handleSyncNow} disabled={syncing} className="gap-1.5">
+                        <RefreshCw className={`size-3.5 ${syncing ? "animate-spin" : ""}`} />
+                        Sync now
+                      </Button>
+                    )}
+                  </div>
+                );
+              }
+
+              return <p>No notifications match your filters.</p>;
+            })()}
           </CardContent>
         </Card>
       ) : (
@@ -393,20 +549,30 @@ export function GovRules() {
                             TDS
                           </Badge>
                         )}
-                        <Badge variant="outline" className="text-xs uppercase">
-                          {r.doc_type}
-                        </Badge>
-                        {isOperative ? (
-                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 text-[10px]">
-                            Operative
+                        {formatTitleCase(r.doc_type) && (
+                          <Badge variant="outline" className="text-xs">
+                            {formatTitleCase(r.doc_type)}
                           </Badge>
-                        ) : isPressRelease ? (
-                          <Badge variant="outline" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 text-[10px]">
-                            Press Release — Not Law
+                        )}
+                        {formatLegalStatus(r.legal_status) && (
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] ${
+                              isOperative
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                : isPressRelease
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                : r.legal_status === "administrative_not_law"
+                                ? "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20"
+                                : ""
+                            }`}
+                          >
+                            {formatLegalStatus(r.legal_status)}
                           </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px]">
-                            {r.legal_status.replace(/_/g, " ")}
+                        )}
+                        {r.is_manual && (
+                          <Badge className="bg-blue-600 text-white font-medium text-[10px]">
+                            Manual
                           </Badge>
                         )}
                         {r.is_new && (
@@ -446,9 +612,9 @@ export function GovRules() {
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Calendar className="size-3" />
-                        {r.issue_date || "Date not stated"}
+                        {renderIssueDate(r.issue_date, r.date_precision)}
                       </span>
-                      {r.doc_number && <span className="font-mono text-[11px]">#{r.doc_number}</span>}
+                      {r.doc_number && <span className="font-mono text-[11px] bg-muted/60 px-1.5 py-0.5 rounded">{r.doc_number}</span>}
                       {r.law_version && r.law_version !== "unknown" && (
                         <span className="text-primary/80 font-medium">{r.law_version}</span>
                       )}
@@ -456,24 +622,46 @@ export function GovRules() {
                     </div>
 
                     {/* AI Explanation / Content Excerpt */}
-                    <div className="mt-3 rounded-lg bg-accent/60 p-3 text-sm">
-                      <div className="flex items-start gap-2">
-                        <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
-                        <div className="space-y-1">
-                          <p className="text-sm text-foreground/90 leading-relaxed">
-                            {r.ai_summary?.summary || (r.content_text ? r.content_text.slice(0, 280) + "…" : "Official notification issued.")}
-                          </p>
-                          {r.ai_summary?.who_is_affected && (
-                            <p className="text-xs text-muted-foreground">
-                              <strong className="text-foreground/80">Affected:</strong> {r.ai_summary.who_is_affected}
+                    {r.text_status === "unreadable" ? (
+                      <div className="mt-3 rounded-lg border border-dashed p-3 text-xs text-muted-foreground flex items-center justify-between">
+                        <span>Text could not be extracted &mdash; open the official document</span>
+                        <a
+                          href={r.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline flex items-center gap-1 font-medium"
+                        >
+                          Official link
+                          <ExternalLink className="size-3" />
+                        </a>
+                      </div>
+                    ) : r.ai_summary?.summary ? (
+                      <div className="mt-3 rounded-lg bg-accent/60 p-3 text-sm">
+                        <div className="flex items-start gap-2">
+                          <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
+                          <div className="space-y-1">
+                            <p className="text-sm text-foreground/90 leading-relaxed">
+                              {r.ai_summary.summary}
                             </p>
-                          )}
-                          <p className="text-[10px] text-muted-foreground/75 italic pt-0.5">
-                            AI-generated simple explanation - verify against the official document
-                          </p>
+                            {r.ai_summary?.who_is_affected && (
+                              <p className="text-xs text-muted-foreground">
+                                <strong className="text-foreground/80">Affected:</strong> {r.ai_summary.who_is_affected}
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted-foreground/75 italic pt-0.5">
+                              AI-generated simple explanation - verify against the official document
+                            </p>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    ) : r.content_text && r.text_status === "ok" ? (
+                      <div className="mt-3 rounded-lg bg-muted/40 p-3 text-xs text-foreground/85">
+                        <p className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                          Excerpt from the official document
+                        </p>
+                        <p className="line-clamp-3 leading-relaxed">{r.content_text}</p>
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* Actions footer */}
@@ -484,7 +672,7 @@ export function GovRules() {
                       onClick={() => setSelectedUpdate(r)}
                       className="text-xs font-medium"
                     >
-                      Read full circular
+                      {r.link_quality === "listing_only" ? "View details" : "Read full circular"}
                     </Button>
                     <a
                       href={r.url}
@@ -492,7 +680,7 @@ export function GovRules() {
                       rel="noopener noreferrer"
                       className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1"
                     >
-                      Official source
+                      {r.link_quality === "listing_only" ? "Official source (listing)" : "Official source"}
                       <ExternalLink className="size-3" />
                     </a>
                   </div>
@@ -788,6 +976,17 @@ export function GovRules() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Manual Import Modal (K10) */}
+      <ManualImportModal
+        open={manualImportOpen}
+        onOpenChange={setManualImportOpen}
+        sources={sources}
+        onSuccess={() => {
+          fetchUpdates();
+          fetchMeta();
+        }}
+      />
     </>
   );
 }

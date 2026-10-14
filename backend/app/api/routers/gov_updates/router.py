@@ -7,7 +7,7 @@ All endpoints require authentication; admin/CA endpoints guarded by require_ca_r
 import uuid
 from typing import Optional, List
 from datetime import date
-from fastapi import APIRouter, Depends, Query, Path, HTTPException, status
+from fastapi import APIRouter, Depends, Query, Path, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -159,3 +159,34 @@ def unsave_gov_update_post(
 ):
     GovUpdateService.unsave_update(db=db, user=current_user, update_id=update_id)
     return {"status": "unsaved", "update_id": str(update_id)}
+
+
+@router.post("/manual-import", response_model=GovUpdateResponse, summary="Manually import an official circular (Admin/CA only)")
+async def manual_import_circular(
+    file: UploadFile = File(...),
+    official_url: str = Form(...),
+    category: str = Form("GST"),
+    doc_type: str = Form("circular"),
+    source_id: Optional[uuid.UUID] = Form(None),
+    title: Optional[str] = Form(None),
+    doc_number: Optional[str] = Form(None),
+    issue_date: Optional[date] = Form(None),
+    effective_date: Optional[date] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_ca_role),
+):
+    file_bytes = await file.read()
+    return GovUpdateService.manual_import(
+        db=db,
+        user=current_user,
+        filename=file.filename or "uploaded_circular.pdf",
+        file_bytes=file_bytes,
+        official_url=official_url,
+        category=category,
+        doc_type=doc_type,
+        source_id=source_id,
+        title=title,
+        doc_number=doc_number,
+        issue_date=issue_date,
+        effective_date=effective_date,
+    )

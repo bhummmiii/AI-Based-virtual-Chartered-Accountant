@@ -51,6 +51,42 @@ TOPIC_KEYWORDS = {
 }
 
 
+ADMINISTRATIVE_KEYWORDS = [
+    "vacancy",
+    "recruitment",
+    "appointment of",
+    "deputation",
+    "empanelment",
+    "consultant",
+    "tender",
+    "rfp",
+    "newsletter",
+    "award",
+    "nomination",
+    "exam",
+    "examination",
+    "webinar",
+    "training",
+    "cpe",
+    "seminar",
+    "membership",
+    "convocation",
+]
+
+AUTHORITY_LAW_SOURCES = {
+    "cbic_gst",
+    "cbic_taxinfo",
+    "incometax_feed",
+    "mca",
+    "rbi_notifications",
+    "sebi_circulars",
+    "egazette_recent",
+    "dor",
+    "gstat",
+    "nfra_orders",
+}
+
+
 def compute_content_hash(title: str, content_text: Optional[str], doc_number: Optional[str], issue_date: Optional[date]) -> str:
     """Computes SHA-256 hash for content change detection."""
     payload = f"{title.strip()}\n{(content_text or '').strip()}\n{doc_number or ''}\n{issue_date or ''}"
@@ -58,6 +94,18 @@ def compute_content_hash(title: str, content_text: Optional[str], doc_number: Op
 
 
 class GovNormalizer:
+    @classmethod
+    def is_administrative(cls, title: str, text: str) -> Tuple[bool, Optional[str]]:
+        """
+        Detects administrative, recruitment, exam or newsletter items (K5).
+        Returns (is_admin, matched_keyword).
+        """
+        snippet = f"{title} {text[:500]}".lower()
+        for kw in ADMINISTRATIVE_KEYWORDS:
+            if kw in snippet:
+                return True, kw
+        return False, None
+
     @classmethod
     def classify_category(cls, source_code: str, title: str, text: str) -> str:
         combined = f"{title} {text}".lower()
@@ -67,9 +115,9 @@ class GovNormalizer:
             return "GST"
         if source_code in ("rbi_notifications", "rbi_pressreleases"):
             return "BANKING"
-        if source_code in ("icai_announcements", "nfra_orders"):
+        if source_code in ("icai_announcements", "nfra_orders", "icai_idtc"):
             return "ACCOUNTING"
-        if source_code == "sebi_circulars":
+        if source_code in ("sebi_circulars", "mca"):
             return "COMPANIES"
 
         # Content keyword rules
@@ -91,8 +139,16 @@ class GovNormalizer:
         return "OTHER"
 
     @classmethod
-    def classify_doc_type(cls, title: str, url: str) -> str:
-        combined = f"{title} {url}".lower()
+    def classify_doc_type(cls, title: str, url: str, text: str = "") -> str:
+        combined = f"{title} {url} {text[:500]}".lower()
+
+        # Administrative classifications (K5)
+        if "newsletter" in combined:
+            return "newsletter"
+        if any(k in combined for k in ["exam", "examination", "webinar", "training", "cpe", "seminar", "convocation"]):
+            return "event_or_exam"
+        if any(k in combined for k in ["vacancy", "recruitment", "deputation", "empanelment", "consultant", "tender", "rfp", "appointment of"]):
+            return "recruitment_or_tender"
 
         if any(k in combined for k in ["press release", "press_release", "pr-", "prid="]):
             return "press_release"
@@ -120,12 +176,23 @@ class GovNormalizer:
         return "other"
 
     @classmethod
-    def classify_legal_status(cls, doc_type: str, title: str, text: str) -> str:
+    def classify_legal_status(cls, doc_type: str, title: str, text: str, source_code: str = "", category: str = "") -> str:
         """
-        Determines legal enforceability.
-        PRESS RELEASES AND PROPOSALS ARE NEVER OPERATIVE INSTRUMENTS (R4, J5).
+        Determines legal enforceability strictly per K5.
+        operative_instrument ONLY when:
+        - doc_type in (notification, circular, order, instruction, rules, act)
+        - NOT administrative
+        - category in (GST, INCOME_TAX, TDS, COMPANIES, ACCOUNTING, BANKING)
+        - source is an authority that issues law
         """
-        combined = f"{title} {text}".lower()
+        combined = f"{title} {text[:500]}".lower()
+
+        # Administrative check (K5)
+        is_admin, _ = cls.is_administrative(title, text)
+        if is_admin:
+            if doc_type == "newsletter":
+                return "newsletter"
+            return "administrative_not_law"
 
         if doc_type == "press_release" or "press release" in combined or "press note" in combined:
             return "press_release_not_law"
@@ -133,11 +200,26 @@ class GovNormalizer:
         if any(k in combined for k in ["exposure draft", "draft", "proposal", "consultation paper"]):
             return "draft_or_proposal"
 
-        if doc_type in ("advisory", "faq") or "advisory" in combined:
+        if doc_type == "faq" or "faq" in combined or "frequently asked" in combined:
+            return "explanatory"
+
+        if doc_type == "advisory" or "advisory" in combined:
             return "advisory"
 
-        if doc_type in ("circular", "notification", "order", "rules", "act", "gazette", "standard"):
+        # Operative Instrument strictly restricted per K5
+        LAW_DOC_TYPES = {"circular", "notification", "order", "instruction", "rules", "act"}
+        LAW_CATEGORIES = {"GST", "INCOME_TAX", "TDS", "COMPANIES", "ACCOUNTING", "BANKING"}
+
+        if (
+            doc_type in LAW_DOC_TYPES
+            and (category in LAW_CATEGORIES or not category)
+            and (source_code in AUTHORITY_LAW_SOURCES or not source_code)
+        ):
             return "operative_instrument"
+
+        if doc_type in LAW_DOC_TYPES:
+            # Non-law authority (e.g. GST Council, ICAI non-law)
+            return "advisory"
 
         return "unknown"
 
@@ -237,24 +319,49 @@ class GovNormalizer:
         """
         content_txt = raw.content_text or ""
         cat = cls.classify_category(source_code, raw.title, content_txt)
-        doc_tp = cls.classify_doc_type(raw.title, raw.url)
-        leg_st = cls.classify_legal_status(doc_tp, raw.title, content_txt)
+        doc_tp = cls.classify_doc_type(raw.title, raw.url, content_txt)
+        leg_st = cls.classify_legal_status(doc_tp, raw.title, content_txt, source_code=source_code, category=cat)
         law_ver = cls.detect_law_version(raw.title, content_txt)
         status, confidence, supersedes_refs = cls.detect_supersedes(raw.title, content_txt)
         topics = cls.extract_topics(raw.title, content_txt)
-        c_hash = compute_content_hash(raw.title, content_txt, raw.doc_number, raw.issue_date)
+
+        # K4: doc_number provenance check - MUST occur in title or content_text
+        doc_num = raw.doc_number.strip() if raw.doc_number else None
+        doc_num_source = raw.doc_number_source
+        if doc_num:
+            if not (doc_num.lower() in raw.title.lower() or (content_txt and doc_num.lower() in content_txt.lower())):
+                doc_num = None
+                doc_num_source = None
+
+        # K5: Administrative items hidden by default
+        is_admin, admin_kw = cls.is_administrative(raw.title, content_txt)
+        hidden = False
+        hidden_reason = None
+        if is_admin:
+            hidden = True
+            hidden_reason = f"administrative_keyword:{admin_kw}"
+        elif raw.link_quality == "listing_only":
+            hidden = True
+            hidden_reason = "listing_only_url"
+
+        c_hash = compute_content_hash(raw.title, content_txt, doc_num, raw.issue_date)
 
         return {
             "title": raw.title.strip(),
             "doc_type": doc_tp,
             "legal_status": leg_st,
-            "doc_number": raw.doc_number.strip() if raw.doc_number else None,
+            "doc_number": doc_num,
+            "doc_number_source": doc_num_source,
             "issue_date": raw.issue_date,
+            "issue_date_source": raw.issue_date_source or ("listing" if raw.issue_date else "none"),
+            "date_precision": raw.date_precision or ("day" if raw.issue_date else "none"),
             "effective_date": raw.effective_date,
             "category": cat,
             "topics": topics,
             "law_version": law_ver,
             "url": raw.url.strip(),
+            "link_quality": raw.link_quality,
+            "ministry": raw.ministry,
             "pdf_url": raw.pdf_url.strip() if raw.pdf_url else None,
             "content_text": content_txt,
             "text_status": raw.text_status,
@@ -262,4 +369,6 @@ class GovNormalizer:
             "status": status,
             "status_confidence": confidence,
             "supersedes_refs": supersedes_refs,
+            "hidden": hidden,
+            "hidden_reason": hidden_reason,
         }

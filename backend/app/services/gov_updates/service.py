@@ -46,10 +46,16 @@ class GovUpdateService:
 
         # Hidden & Administrative filtering (K5 & K12)
         if not show_hidden:
-            query = query.filter(GovUpdate.hidden == False)
-
-        if not show_administrative:
-            query = query.filter(GovUpdate.legal_status != "administrative_not_law")
+            if show_administrative:
+                query = query.filter(
+                    or_(
+                        GovUpdate.hidden == False,
+                        GovUpdate.legal_status.in_(["administrative_not_law", "newsletter"])
+                    )
+                )
+            else:
+                query = query.filter(GovUpdate.hidden == False)
+                query = query.filter(GovUpdate.legal_status != "administrative_not_law")
 
         # Filters
         if category and category.upper() != "ALL":
@@ -439,3 +445,169 @@ class GovUpdateService:
         else:
             results = engine.sync_all(db, backfilled=backfill)
             return {"results": results, "total_synced": len(results)}
+
+    @classmethod
+    def manual_import(
+        cls,
+        db: Session,
+        user: User,
+        filename: str,
+        file_bytes: bytes,
+        official_url: str,
+        category: str,
+        doc_type: str,
+        source_id: Optional[uuid.UUID] = None,
+        title: Optional[str] = None,
+        doc_number: Optional[str] = None,
+        issue_date: Optional[date] = None,
+        effective_date: Optional[date] = None,
+    ) -> GovUpdateResponse:
+        import re
+        from fastapi import HTTPException
+        from app.services.gov_updates.adapters.pdf_extractor import extract_pdf_text
+        from app.services.gov_updates.text_quality import evaluate_and_clean_document_text
+        from app.services.gov_updates.adapters.html_adapter import parse_date_strict
+        from app.services.gov_updates.normalizer import GovNormalizer, compute_content_hash
+        from app.services.gov_updates.ai_explainer import GovAiExplainer
+
+        ALLOWED_OFFICIAL_DOMAINS = [
+            ".gov.in",
+            ".nic.in",
+            "rbi.org.in",
+            "icai.org",
+            "sebi.gov.in",
+            "nfra.gov.in",
+            "epfindia.gov.in",
+            "esic.gov.in",
+        ]
+        url_lower = official_url.lower()
+        if not any(dom in url_lower for dom in ALLOWED_OFFICIAL_DOMAINS):
+            raise HTTPException(
+                status_code=400,
+                detail="Official URL domain must belong to the official government allowlist (.gov.in, .nic.in, rbi.org.in, icai.org, sebi.gov.in, nfra.gov.in, etc.)",
+            )
+
+        if len(file_bytes) > 15 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Uploaded file exceeds maximum limit of 15 MB.")
+
+        content_text = ""
+        text_status = "no_text"
+        if filename.lower().endswith(".pdf"):
+            content_text, text_status = extract_pdf_text(file_bytes)
+        else:
+            try:
+                raw_txt = file_bytes.decode("utf-8", errors="replace")
+                content_text, text_status = evaluate_and_clean_document_text(raw_txt)
+            except Exception:
+                content_text = ""
+                text_status = "no_text"
+
+        final_title = title.strip() if title else ""
+        if not final_title:
+            if content_text:
+                first_line = content_text.strip().split("\n")[0][:200].strip()
+                final_title = first_line or filename
+            else:
+                final_title = filename
+
+        final_issue_date = issue_date
+        date_precision = "day" if final_issue_date else "none"
+        date_source = "user_input" if final_issue_date else "none"
+        if not final_issue_date and content_text:
+            parsed_d, prec = parse_date_strict(content_text[:1000])
+            if parsed_d:
+                final_issue_date = parsed_d
+                date_precision = prec
+                date_source = "document_text"
+
+        final_doc_num = doc_number.strip() if doc_number else None
+        doc_num_source = "user_input" if final_doc_num else None
+        if not final_doc_num and content_text:
+            circ_m = re.search(r"(?:Circular|Notification|Order)\s+(?:No\.?|Number)?\s*([A-Za-z0-9\-/]+)", content_text[:1000], re.IGNORECASE)
+            if circ_m:
+                final_doc_num = circ_m.group(1).strip()
+                doc_num_source = "document_text"
+
+        target_source = None
+        if source_id:
+            target_source = db.query(GovSource).filter(GovSource.id == source_id).first()
+        if not target_source:
+            target_source = db.query(GovSource).first()
+
+        content_hash = compute_content_hash(final_title, content_text, final_doc_num, final_issue_date)
+
+        existing = db.query(GovUpdate).filter(GovUpdate.content_hash == content_hash).first()
+        if not existing and final_doc_num and final_issue_date:
+            existing = db.query(GovUpdate).filter(
+                GovUpdate.doc_number == final_doc_num,
+                GovUpdate.issue_date == final_issue_date,
+            ).first()
+
+        if existing:
+            # Second import of the same file creates no duplicate
+            return cls.get_update_by_id(db, user, existing.id)
+
+        source_code = target_source.code if target_source else ""
+        norm_cat = category or GovNormalizer.classify_category(source_code, final_title, content_text)
+        norm_type = doc_type or GovNormalizer.classify_doc_type(final_title, official_url, content_text)
+        leg_status = GovNormalizer.classify_legal_status(norm_type, final_title, content_text, source_code=source_code, category=norm_cat)
+        law_ver = GovNormalizer.detect_law_version(final_title, content_text)
+        topics = GovNormalizer.extract_topics(final_title, content_text)
+        status, confidence, supersedes_refs = GovNormalizer.detect_supersedes(final_title, content_text)
+
+        ai_summary = None
+        ai_status = "none"
+        if text_status == "ok":
+            explainer = GovAiExplainer()
+            ai_summary, ai_status = explainer.generate_explanation(final_title, content_text, text_status)
+
+        now = datetime.now(timezone.utc)
+        new_u = GovUpdate(
+            source_id=target_source.id,
+            title=final_title,
+            doc_type=norm_type,
+            legal_status=leg_status,
+            doc_number=final_doc_num,
+            doc_number_source=doc_num_source,
+            issue_date=final_issue_date,
+            issue_date_source=date_source,
+            date_precision=date_precision,
+            effective_date=effective_date,
+            category=norm_cat,
+            topics=topics,
+            law_version=law_ver,
+            url=official_url.strip(),
+            link_quality="direct_document",
+            content_text=content_text,
+            text_status=text_status,
+            content_hash=content_hash,
+            status=status,
+            status_confidence=confidence,
+            supersedes_refs=supersedes_refs,
+            hidden=False,
+            is_manual=True,
+            manual_added_by=user.id,
+            manual_added_at=now,
+            first_seen_at=now,
+            last_seen_at=now,
+            fetched_at=now,
+            updated_at=now,
+            backfilled=False,
+            ai_summary=ai_summary,
+            ai_status=ai_status,
+        )
+        db.add(new_u)
+
+        run = GovFetchRun(
+            source_id=target_source.id,
+            started_at=now,
+            finished_at=now,
+            status="success",
+            items_new=1,
+            error_message=f"Manual circular upload by CA/Admin {user.id} ({filename})",
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(new_u)
+
+        return cls.get_update_by_id(db, user, new_u.id)

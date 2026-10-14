@@ -1,0 +1,142 @@
+{
+  "category_counts": {
+    "BANKING": 36,
+    "GST": 13,
+    "ACCOUNTING": 12
+  },
+  "total_updates": 61,
+  "last_sync_at": "2026-10-14T21:25:44.386993+05:30",
+  "last_attempt_at": "2026-10-14T21:25:44.386993+05:30",
+  "sources_total": 17,
+  "sources_ok": 6,
+  "sources_degraded": 0,
+  "sources_blocked": 6,
+  "sources_unreachable": 5,
+  "sources_disabled": 0,
+  "category_sources": {
+    "GST": [
+      {
+        "code": "gstcouncil",
+        "name": "Goods and Services Tax Council",
+        "status": "ok",
+        "enabled": true,
+        "last_error": null
+      },
+      {
+        "code": "cbic_gst",
+        "name": "CBIC GST Portal",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "TLS handshake failure on cbic-gst.gov.in:443"
+      },
+      {
+        "code": "cbic_taxinfo",
+        "name": "CBIC Tax Information Publisher",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "Connection timed out to 163.227.109.58:443 during probe"
+      },
+      {
+        "code": "gstn_news",
+        "name": "GST Portal News & Updates",
+        "status": "blocked_requires_verification",
+        "enabled": false,
+        "last_error": "HTTP 403 WAF bot challenge detected on /newsandupdates"
+      },
+      {
+        "code": "mahagst",
+        "name": "Maharashtra State GST",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "Host connection timed out / subpaths redirected to login"
+      }
+    ],
+    "INCOME_TAX": [
+      {
+        "code": "incometax_feed",
+        "name": "Income Tax Department RSS",
+        "status": "blocked_requires_verification",
+        "enabled": false,
+        "last_error": "HTTP 403 WAF challenge on /tax-feeds and direct RSS feeds"
+      },
+      {
+        "code": "dor",
+        "name": "Department of Revenue",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "Connection timed out to dor.gov.in during probe"
+      }
+    ],
+    "BUDGET": [
+      {
+        "code": "indiabudget",
+        "name": "Union Budget of India",
+        "status": "blocked_requires_verification",
+        "enabled": false,
+        "last_error": "HTTP 403 WAF challenge detected on indiabudget.gov.in"
+      },
+      {
+        "code": "finmin",
+        "name": "Ministry of Finance",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "Connection timed out to 164.100.154.21:443 (10s)"
+      },
+      {
+        "code": "dor",
+        "name": "Department of Revenue",
+        "status": "unreachable",
+        "enabled": false,
+        "last_error": "Connection timed out to dor.gov.in during probe"
+      }
+    ],
+    "ACCOUNTING": [
+      {
+        "code": "icai_announcements",
+        "name": "Institute of Chartered Accountants of India",
+        "status": "ok",
+        "enabled": true,
+        "last_error": null
+      },
+      {
+        "code": "nfra_orders",
+        "name": "National Financial Reporting Authority",
+        "status": "ok",
+        "enabled": true,
+        "last_error": null
+      }
+    ],
+    "BANKING": [
+      {
+        "code": "rbi_notifications",
+        "name": "Reserve Bank of India (Notifications)",
+        "status": "ok",
+        "enabled": true,
+        "last_error": null
+      },
+      {
+        "code": "rbi_pressreleases",
+        "name": "Reserve Bank of India (Press Releases)",
+        "status": "ok",
+        "enabled": true,
+        "last_error": null
+      }
+    ],
+    "CORPORATE_LAW": [
+      {
+        "code": "mca",
+        "name": "Ministry of Corporate Affairs",
+        "status": "blocked_requires_verification",
+        "enabled": false,
+        "last_error": "HTTP 403 WAF challenge detected during probe"
+      },
+      {
+        "code": "sebi_circulars",
+        "name": "Securities and Exchange Board of India",
+        "status": "blocked_requires_verification",
+        "enabled": true,
+        "last_error": "In-page CAPTCHA challenge detected"
+      }
+    ]
+  }
+}

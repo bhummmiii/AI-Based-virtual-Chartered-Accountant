@@ -1,0 +1,4 @@
+clients: 52
+documents: 65
+uploaded_documents: 57
+journal_entries: 21
