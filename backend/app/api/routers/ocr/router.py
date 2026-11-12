@@ -1074,16 +1074,24 @@ def _preprocess_image_for_ocr(img_bytes: bytes):
     """
     Full OpenCV + PIL preprocessing pipeline for maximum Tesseract accuracy.
 
-    Steps (all gracefully skipped if OpenCV is unavailable):
-      1. Upscale to ≥1800px on longest side (Tesseract accuracy degrades below ~150 DPI effective)
+    Steps:
+      0. DocumentImageEnhancer: deblurring, super-resolution HD, CLAHE shadow removal
+      1. Upscale to >=1800px on longest side
       2. Convert to grayscale
       3. Deskew/rotate using orientation detection via pytesseract.image_to_osd
-      4. Adaptive threshold (Gaussian) — handles uneven phone-photo lighting
+      4. Adaptive threshold (Gaussian)
       5. Denoise with cv2.fastNlMeansDenoising
     Returns a PIL.Image ready for Tesseract.
     """
     from PIL import Image
     import io
+    try:
+        from app.services.image_enhancer import DocumentImageEnhancer
+        cleaned_b, _, _ = DocumentImageEnhancer.analyze_and_enhance(img_bytes)
+        img_bytes = cleaned_b
+    except Exception:
+        pass
+
     img = Image.open(io.BytesIO(img_bytes))
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
@@ -3412,7 +3420,7 @@ _CATEGORY_FIELD_SCHEMA: Dict[str, Dict[str, str]] = {
         "invoice_number": "Invoice number (e.g. INV-001) — null if this is a multi-invoice report",
         "invoice_date": "Invoice date (YYYY-MM-DD) — null if this is a report",
         "customer": "Customer or buyer name",
-        "gstin": "GSTIN (15-char Indian tax ID, e.g. 27AABCN1234R1Z5)",
+        "gstin": "Seller/supplier GSTIN (15-char, e.g. 27AABCN1234R1Z5). Must be the seller/supplier GSTIN.",
         "supplier_gstin": "Seller/supplier GSTIN (15-char)",
         "customer_gstin": "Buyer/customer GSTIN (15-char)",
         "supplier_pan": "10-character PAN of seller [A-Z]{5}[0-9]{4}[A-Z] or chars 3-12 of seller GSTIN",
@@ -4152,6 +4160,12 @@ async def extract_ocr(
     # ocr_confidence is set in the is_image branch; init here so always accessible.
     ocr_confidence: float = 100.0
 
+    # ── Accuracy Verification & Cleaned HD Image Restoration ──
+    quality_report = None
+    cleaned_image_data_url: Optional[str] = None
+    processed_content: bytes = content
+    from app.services.image_enhancer import DocumentImageEnhancer
+
     if is_pdf:
         raw_text, extraction_method = _ocr_pdf(content)
         logger.info("Attempting PDF table and metadata extraction...")
@@ -4175,12 +4189,34 @@ async def extract_ocr(
             except Exception as pdf_tbl_err:
                 logger.debug("Rasterized PDF table fallback skipped: %s", pdf_tbl_err)
 
+        # PDF page preview & quality verification
+        try:
+            import fitz
+            doc = fitz.open(stream=content, filetype="pdf")
+            if len(doc) > 0:
+                first_page_img = doc[0].get_pixmap(dpi=200).tobytes("jpeg")
+                _, quality_report, cleaned_image_data_url = DocumentImageEnhancer.analyze_and_enhance(first_page_img)
+            doc.close()
+        except Exception as pdf_err:
+            logger.debug("PDF quality assessment skipped: %s", pdf_err)
+
     elif is_image:
-        raw_text, ocr_confidence = _ocr_image(content)
+        try:
+            cleaned_bytes, quality_report, cleaned_image_data_url = DocumentImageEnhancer.analyze_and_enhance(content)
+            processed_content = cleaned_bytes
+            logger.info(
+                "Image preprocessing completed: score=%.1f%%, clarity=%s, blurry=%s, enhancements=%d",
+                quality_report.accuracy_score, quality_report.clarity_level, quality_report.is_blurry, len(quality_report.enhancements_applied)
+            )
+        except Exception as enh_err:
+            logger.warning("Image enhancer error: %s", enh_err)
+            processed_content = content
+
+        raw_text, ocr_confidence = _ocr_image(processed_content)
         extraction_method = "ocr_tesseract"
         logger.info("Image OCR complete: %d chars, mean_confidence=%.1f%%", len(raw_text), ocr_confidence)
-        # X-coordinate column clustering for table structure
-        tables = _extract_tables_from_image_ocr(content, raw_text)
+        # X-coordinate column clustering for table structure using cleaned HD image
+        tables = _extract_tables_from_image_ocr(processed_content, raw_text)
 
     elif is_docx:
         raw_text = _ocr_docx(content)
@@ -4228,6 +4264,9 @@ async def extract_ocr(
             "core_fields": {},
             "metadata_fields": {},
             "table_data": None,
+            "image_quality": quality_report.to_dict() if quality_report else None,
+            "accuracy_verification": quality_report.to_dict() if quality_report else None,
+            "cleaned_image_url": cleaned_image_data_url if cleaned_image_data_url else None,
             "validation": {"gstin": {}, "amounts": {}, "warnings": []},
             "extraction_summary": {"fields_found": 0, "table_rows_found": 0},
             "raw_text": "",
@@ -4270,7 +4309,7 @@ async def extract_ocr(
                 "Triggering Gemini Vision fallback for %s (extracted=%d, conf=%.1f%%)",
                 "PDF" if is_pdf else "image", extracted_count, ocr_confidence,
             )
-            gemini_fields, gemini_line_items = _gemini_vision_extract(content, category)
+            gemini_fields, gemini_line_items = _gemini_vision_extract(processed_content, category)
             extraction_method = "ocr_gemini_vision"
         else:
             # Text-based Gemini (for DOCX/plain text with 0 regex hits)
@@ -4358,11 +4397,47 @@ async def extract_ocr(
                             else:
                                 meta_fields[k] = _field(gemini_val, "extracted")
 
-            # Ensure core gstin is populated if supplier_gstin was extracted
-            if not (core_fields.get("gstin") or {}).get("value"):
-                sup_g = (meta_fields.get("supplier_gstin") or core_fields.get("supplier_gstin") or {}).get("value")
+            # Ensure core gstin is populated correctly from supplier_gstin
+            sup_g = (meta_fields.get("supplier_gstin") or core_fields.get("supplier_gstin") or {}).get("value")
+            cust_g = (meta_fields.get("customer_gstin") or core_fields.get("customer_gstin") or {}).get("value")
+            curr_g = (core_fields.get("gstin") or {}).get("value")
+
+            if category in ("sales_records", "b2b_invoice", "b2c_invoice", "e_invoice"):
+                if sup_g:
+                    if curr_g and curr_g != sup_g and not cust_g:
+                        meta_fields["customer_gstin"] = _field(curr_g, "extracted")
+                    core_fields["gstin"] = _field(sup_g, "extracted")
+            elif category in ("purchase_records", "bills"):
                 if sup_g:
                     core_fields["gstin"] = _field(sup_g, "extracted")
+            else:
+                if not curr_g and sup_g:
+                    core_fields["gstin"] = _field(sup_g, "extracted")
+
+            # Enrich line items with full HSN code if line item has 4-digit code and document/summary has full 6/8-digit HSN
+            doc_hsn = (core_fields.get("hsn") or meta_fields.get("hsn") or {}).get("value", "")
+            raw_hsn_sum = gemini_fields.get("hsn_summary") or []
+            if isinstance(raw_hsn_sum, str):
+                try:
+                    raw_hsn_sum = json.loads(raw_hsn_sum)
+                except Exception:
+                    raw_hsn_sum = []
+            hsn_candidates = [doc_hsn] if doc_hsn else []
+            if isinstance(raw_hsn_sum, list):
+                for hr in raw_hsn_sum:
+                    if isinstance(hr, dict) and hr.get("hsn"):
+                        hsn_candidates.append(str(hr["hsn"]).strip())
+
+            if gemini_line_items and enriched_rows:
+                for row in enriched_rows:
+                    curr_item_hsn = str(row.get("hsn") or "").strip()
+                    if curr_item_hsn:
+                        for cand in hsn_candidates:
+                            if cand and len(cand) > len(curr_item_hsn) and cand.startswith(curr_item_hsn):
+                                row["hsn"] = cand
+                                if "HSN / SAC" in row:
+                                    row["HSN / SAC"] = cand
+                                break
 
             logger.info("Gemini added/updated %d fields: %s", len(gemini_fields), list(gemini_fields.keys()))
 
@@ -4569,6 +4644,10 @@ async def extract_ocr(
         "core_fields":       core_fields,
         "metadata_fields":   meta_fields,
         "table_data":        table_data,
+        # ── Accuracy Verification & Cleaned HD Image ──
+        "image_quality":     quality_report.to_dict() if quality_report else None,
+        "accuracy_verification": quality_report.to_dict() if quality_report else None,
+        "cleaned_image_url": cleaned_image_data_url if cleaned_image_data_url else None,
         # ── Validation & summary ──
         "validation": validation,
         "extraction_summary": {

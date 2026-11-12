@@ -93,6 +93,14 @@ def sanitize_document_parties(
     if not isinstance(fields, dict):
         fields = {}
         meta_dict["fields"] = fields
+    elif "fields" in fields and isinstance(fields["fields"], dict):
+        nested = fields.pop("fields")
+        for nk, nv in nested.items():
+            if nk not in fields:
+                fields[nk] = nv
+    # Purge accidental structural keys from fields dictionary
+    for sk in ("table_data", "line_items", "line_item_headers", "hsn_summary", "fields", "fields_raw"):
+        fields.pop(sk, None)
 
     def _get_f(k: str) -> str:
         v = fields.get(k)

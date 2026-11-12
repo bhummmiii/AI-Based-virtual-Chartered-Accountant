@@ -1116,6 +1116,8 @@ export function ClientWorkspace() {
         onOpenChange={setScanOpen}
         category={selectedCategory}
         clientId={clientDbId}
+        clientGstin={client?.gstNumber}
+        clientName={client?.companyName}
         onSuccess={fetchDocs}
       />
       <FilePreviewModal

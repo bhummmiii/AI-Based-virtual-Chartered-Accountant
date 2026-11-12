@@ -268,9 +268,3 @@ Evaluation Parameter                                 Target Score   Self-Assessm
 TOTAL EVALUATION SCORE                                50 / 50       Comprehensive, fully working AI CA platform.
 ====================================================================================================
 EOF
-
-
-
-yesss gooo
-make sure to make no mistakes 
-do not make changes in the previous parts as it is working properly fine as i want it to

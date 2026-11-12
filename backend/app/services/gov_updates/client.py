@@ -17,6 +17,7 @@ Strictly implements R5 and R6:
 import time
 import socket
 import ipaddress
+import re
 import urllib.robotparser
 from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Optional, Set, Tuple
@@ -165,12 +166,13 @@ class GovHttpClient:
             return True, f"HTTP {status_code} access blocked by host"
 
         low_text = text.lower()
-        if "cf-chl-bypass" in low_text or "g-recaptcha" in low_text or "hcaptcha" in low_text or "please verify you are a human" in low_text:
+        if "cf-chl-bypass" in low_text or "g-recaptcha" in low_text or bool(re.search(r"\bhcaptcha\b", low_text)) or "h-captcha" in low_text or "hcaptcha.com" in low_text or "please verify you are a human" in low_text:
             return True, "In-page CAPTCHA challenge detected"
         if "<title>just a moment...</title>" in low_text or "ray id:" in low_text:
             return True, "Cloudflare waiting room / challenge detected"
         if "<form" in low_text and ("login" in low_text or "signin" in low_text) and "password" in low_text:
-            return True, "Redirected to login wall"
+            if not ("<table" in low_text and "<tr" in low_text and any(k in low_text for k in ["circular", "notification", "announcement", "order"])):
+                return True, "Redirected to login wall"
 
         return False, None
 

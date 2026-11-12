@@ -30,11 +30,13 @@ from app.models.chart_of_accounts import ChartOfAccounts
 from app.models.journal_entry import JournalEntry, JournalEntryLine
 from app.models.accounting_period import AccountingPeriod
 from app.models.government_update import GovSource, GovUpdate, GovFetchRun, GovSavedUpdate
+from app.models.user_settings import UserSettings
 
 __all__ = [
     "User", "Client", "AccountingRecord", "GSTRecord", "TaxRecord",
     "AuditReport", "Invoice", "Document", "GovernmentRule", "Notification",
     "UploadedDocument", "ChartOfAccounts", "JournalEntry", "JournalEntryLine",
     "AccountingPeriod", "GovSource", "GovUpdate", "GovFetchRun", "GovSavedUpdate",
+    "UserSettings",
 ]
 

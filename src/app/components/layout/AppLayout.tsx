@@ -19,7 +19,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Input } from "../ui/input";
-import { Avatar, AvatarFallback } from "../ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { GlobalSearch } from "../common/GlobalSearch";
 import notificationService, { AppNotification } from "../../services/notification.service";
 import {
@@ -34,6 +34,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "../ui/sheet";
 import { Button } from "../ui/button";
 import { cn } from "../ui/utils";
 import { useApp } from "../../context/AppContext";
+import { useTranslation } from "../../context/LanguageContext";
 import { authService, getStoredUser } from "../../services/auth.service";
 
 const nav = [
@@ -65,32 +66,40 @@ function Brand() {
 }
 
 function NavItems({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useTranslation();
+  const navItems = [
+    { to: "/app", label: t("nav.dashboard"), icon: LayoutDashboard, end: true },
+    { to: "/app/workspace", label: t("nav.workspace"), icon: FolderKanban },
+    { to: "/app/assistant", label: t("nav.assistant"), icon: Sparkles },
+    { to: "/app/updates", label: t("nav.updates"), icon: Landmark },
+    { to: "/app/reports", label: t("nav.reports"), icon: FileBarChart },
+    { to: "/app/settings", label: t("nav.settings"), icon: Settings },
+  ];
+
   return (
     <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-      {nav.map((group) => (
-        <div key={group.section} className="space-y-1">
-          <p className="px-3 pb-1 text-xs uppercase tracking-wider text-muted-foreground">{group.section}</p>
-          {group.items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={(item as { end?: boolean }).end}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  isActive
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground hover:bg-secondary",
-                )
-              }
-            >
-              <item.icon className="size-4.5 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
-        </div>
-      ))}
+      <div className="space-y-1">
+        <p className="px-3 pb-1 text-xs uppercase tracking-wider text-muted-foreground">{t("nav.menu")}</p>
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                isActive
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground hover:bg-secondary",
+              )
+            }
+          >
+            <item.icon className="size-4.5 shrink-0" />
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
     </nav>
   );
 }
@@ -118,6 +127,7 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const { theme, toggleTheme, refreshClients, clients } = useApp();
+  const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState(getStoredUser());
 
   // ── Live Notifications State ────────────────────────────────
@@ -185,9 +195,16 @@ export function AppLayout() {
     };
     window.addEventListener("finledger:notification-update", handleUpdate);
 
+    // Sync user changes live across header without requiring full reload
+    const handleUserUpdate = () => {
+      setCurrentUser(getStoredUser());
+    };
+    window.addEventListener("ca_user_updated", handleUserUpdate);
+
     return () => {
       clearInterval(timer);
       window.removeEventListener("finledger:notification-update", handleUpdate);
+      window.removeEventListener("ca_user_updated", handleUserUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -200,13 +217,6 @@ export function AppLayout() {
           <Brand />
         </div>
         <NavItems />
-        <div className="border-t border-sidebar-border p-3">
-          <div className="rounded-lg bg-accent p-3">
-            <p className="text-sm text-accent-foreground">Pro plan</p>
-            <p className="text-muted-foreground text-xs">Unlimited AI audits & OCR</p>
-            <Button size="sm" className="mt-2 w-full">Manage plan</Button>
-          </div>
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -328,13 +338,16 @@ export function AppLayout() {
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-secondary">
                   <Avatar className="size-8">
+                    {currentUser.profile_image && (
+                      <AvatarImage src={currentUser.profile_image} alt={currentUser.full_name} />
+                    )}
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
                       {currentUser.initials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="hidden text-left leading-tight sm:block">
                     <p className="text-sm font-medium text-foreground">{currentUser.full_name}</p>
-                    <p className="text-muted-foreground text-xs">Chartered Accountant</p>
+                    <p className="text-muted-foreground text-xs">{t("header.role")}</p>
                   </div>
                   <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
                 </button>
@@ -345,13 +358,13 @@ export function AppLayout() {
                     <p className="text-sm font-semibold text-foreground">{currentUser.full_name}</p>
                     <p className="text-xs text-muted-foreground truncate">{currentUser.email}</p>
                     <span className="w-fit rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                      Chartered Accountant
+                      {t("header.role")}
                     </span>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate("/app/settings")}>
-                  <Settings className="size-4" /> Settings
+                  <Settings className="size-4" /> {t("nav.settings")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
@@ -359,7 +372,7 @@ export function AppLayout() {
                     navigate("/");
                   }}
                 >
-                  <LogOut className="size-4" /> Sign out
+                  <LogOut className="size-4" /> {t("header.sign_out")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

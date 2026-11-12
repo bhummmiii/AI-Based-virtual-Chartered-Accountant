@@ -52,6 +52,7 @@ export interface StoredUser {
   initials: string;
   firstName: string;
   lastName: string;
+  profile_image?: string | null;
 }
 
 export interface RecentAccount {
@@ -64,6 +65,7 @@ export function getStoredUser(): StoredUser {
   let full_name = "Mahendra Pawar";
   let email = "Mahendrapawar@gmail.com";
   let role = "ca";
+  let profile_image: string | null = null;
 
   try {
     const raw = localStorage.getItem("ca_user");
@@ -78,6 +80,9 @@ export function getStoredUser(): StoredUser {
       if (parsed.role) {
         role = parsed.role;
       }
+      if (parsed.profile_image) {
+        profile_image = parsed.profile_image;
+      }
     }
   } catch {}
 
@@ -89,7 +94,7 @@ export function getStoredUser(): StoredUser {
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
       : full_name.slice(0, 2).toUpperCase();
 
-  return { full_name, email, role, initials, firstName, lastName };
+  return { full_name, email, role, initials, firstName, lastName, profile_image };
 }
 
 export function getUserInitials(name: string): string {

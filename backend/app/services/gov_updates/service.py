@@ -339,7 +339,7 @@ class GovUpdateService:
 
         CATEGORY_SOURCE_MAPPING = {
             "GST": ["gstcouncil", "cbic_gst", "cbic_taxinfo", "gstn_news", "mahagst", "icai_idtc", "gstat"],
-            "INCOME_TAX": ["incometax_feed", "dor", "incometax_press_rss"],
+            "INCOME_TAX": ["incometax_feed", "dor", "egazette_recent"],
             "BUDGET": ["indiabudget", "finmin", "dor"],
             "ACCOUNTING": ["icai_announcements", "nfra_orders", "icai_accounting_std"],
             "BANKING": ["rbi_notifications", "rbi_pressreleases"],

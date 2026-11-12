@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer,
-  Tooltip, XAxis, YAxis,
+  Tooltip, XAxis, YAxis, Legend,
 } from "recharts";
 import {
   Download, FileText, FileSpreadsheet, FileType,
@@ -163,6 +163,55 @@ function buildMonthChart(
   });
 }
 
+// ─── Custom Dark-Themed Tooltip for Revenue vs Expenses Chart ─────────────────
+function CustomChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+
+  const revItem = payload.find((p: any) => p.dataKey === "revenue" || p.name === "Revenue");
+  const expItem = payload.find((p: any) => p.dataKey === "expenses" || p.name === "Expenses");
+
+  const revVal = Number(revItem?.value) || 0;
+  const expVal = Number(expItem?.value) || 0;
+  const net = revVal - expVal;
+
+  return (
+    <div className="rounded-lg border border-border/80 bg-slate-900/95 p-3 shadow-xl backdrop-blur-md min-w-[230px] text-xs space-y-2">
+      <div className="font-semibold text-slate-100 border-b border-border/60 pb-1.5 flex items-center justify-between">
+        <span>{label}</span>
+        <span className="text-[10px] text-muted-foreground font-normal">Monthly Ledger</span>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="size-2.5 rounded-full bg-[#3b82f6] shrink-0" />
+            <span className="text-slate-300">Revenue (Sales / Inflow)</span>
+          </div>
+          <span className="font-mono font-semibold text-blue-400">
+            {currency(revVal)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="size-2.5 rounded-full bg-[#2dd4bf] shrink-0" />
+            <span className="text-slate-300">Expenses (Purchases / Outflow)</span>
+          </div>
+          <span className="font-mono font-semibold text-teal-400">
+            {currency(expVal)}
+          </span>
+        </div>
+      </div>
+      {(revVal > 0 || expVal > 0) && (
+        <div className="border-t border-border/60 pt-1.5 flex items-center justify-between gap-3 font-medium">
+          <span className="text-muted-foreground">Net Margin</span>
+          <span className={`font-mono font-semibold ${net >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+            {net >= 0 ? "+" : ""}{currency(net)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ──────────────────────────────────────────────────────────
 export function Reports() {
   const { clients } = useApp();
@@ -286,7 +335,9 @@ export function Reports() {
     [allLedger, period]
   );
   const chartRevTotal = chartData.reduce((s, d) => s + d.revenue, 0);
-  const hasChartData  = chartRevTotal > 0 || chartData.some((d) => d.expenses > 0);
+  const chartExpTotal = chartData.reduce((s, d) => s + d.expenses, 0);
+  const chartNetProfit = chartRevTotal - chartExpTotal;
+  const hasChartData  = chartRevTotal > 0 || chartExpTotal > 0;
 
   const isLoading = overviewLoading || ledgerLoading;
 
@@ -580,29 +631,46 @@ export function Reports() {
 
       {/* ── Revenue vs Expenses Chart ────────────────────────── */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-3">
           <div>
-            <CardTitle>
-              {hasChartData
-                ? `Revenue by Month — ${compact(chartRevTotal)} total`
-                : "Revenue & Expenses by Month"}
-            </CardTitle>
+            <CardTitle>Revenue vs Expenses by Month</CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               {hasChartData
-                ? "Aggregated from posted ledger entries across all clients"
+                ? "Aggregated from posted ledger entries across all clients (Sales / Inflow vs Purchases / Outflow)"
                 : "Chart will populate once accounting entries are uploaded"}
             </p>
           </div>
-          {ledgerLoading && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <RefreshCw className="size-3.5 animate-spin" /> Fetching ledger…
-            </span>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {hasChartData && (
+              <>
+                <div className="flex items-center gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-400">
+                  <span className="size-2 rounded-full bg-[#3b82f6]" />
+                  <span>Revenue: {compact(chartRevTotal)}</span>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-md border border-teal-500/30 bg-teal-500/10 px-2.5 py-1 text-xs font-medium text-teal-400">
+                  <span className="size-2 rounded-full bg-[#2dd4bf]" />
+                  <span>Expenses: {compact(chartExpTotal)}</span>
+                </div>
+                <div className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${
+                  chartNetProfit >= 0
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                    : "border-rose-500/30 bg-rose-500/10 text-rose-400"
+                }`}>
+                  <span>Net: {chartNetProfit >= 0 ? "+" : ""}{compact(chartNetProfit)}</span>
+                </div>
+              </>
+            )}
+            {ledgerLoading && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground ml-1">
+                <RefreshCw className="size-3.5 animate-spin" /> Fetching ledger…
+              </span>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {hasChartData ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={chartData} margin={{ left: -10 }} barGap={2}>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={chartData} margin={{ left: -10, top: 10, right: 10, bottom: 0 }} barGap={3}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   dataKey="month"
@@ -617,12 +685,25 @@ export function Reports() {
                   width={72}
                   tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
                 />
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  content={() => (
+                    <div className="flex items-center justify-end gap-5 text-xs font-medium mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="size-3 rounded-xs bg-[#3b82f6] shadow-xs" />
+                        <span className="text-foreground">Revenue (Sales / Income)</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="size-3 rounded-xs bg-[#2dd4bf] shadow-xs" />
+                        <span className="text-foreground">Expenses (Purchases / Costs)</span>
+                      </div>
+                    </div>
+                  )}
+                />
                 <Tooltip
-                  formatter={(v: number, name: string) => [
-                    currency(v),
-                    name === "revenue" ? "Revenue" : "Expenses",
-                  ]}
-                  cursor={{ fill: "var(--secondary)" }}
+                  content={<CustomChartTooltip />}
+                  cursor={{ fill: "var(--secondary)", opacity: 0.35 }}
                 />
                 <Bar dataKey="revenue"  fill="var(--chart-1)" radius={[4, 4, 0, 0]} maxBarSize={32} name="Revenue" />
                 <Bar dataKey="expenses" fill="var(--chart-2)" radius={[4, 4, 0, 0]} maxBarSize={32} name="Expenses" />

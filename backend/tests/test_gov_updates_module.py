@@ -679,3 +679,61 @@ def test_administrative_keywords_and_hidden(db_session, mock_users):
     res_admin = GovUpdateService.list_updates(db_session, ca_user, show_administrative=True)
     assert any(u.title == admin_update.title for u in res_admin.items)
 
+
+def test_sebi_challenge_detection_boundary_fix():
+    """Verify refreshcaptcha button does not trigger false positive CAPTCHA or login wall."""
+    client = GovHttpClient()
+    sebi_html_snippet = """
+    <html>
+      <head><title>Circulars - Securities and Exchange Board of India</title></head>
+      <body>
+        <form name="homeform" method="post" action="/sebiweb">
+          <input name="loginpassword" id="loginpassword" type="password" />
+          <a class="refreshcaptcha" href="javascript:refreshCaptcha();">refresh</a>
+          <table>
+            <tr><th>Title</th><th>Date</th></tr>
+            <tr>
+              <td><a href="/circulars/2026/sebi_01.pdf">SEBI/HO/MIRSD/CIR/P/2026/01 Master Circular</a></td>
+              <td>12-Oct-2026</td>
+            </tr>
+          </table>
+        </form>
+      </body>
+    </html>
+    """
+    is_challenge, reason = client.detect_challenge(200, {}, sebi_html_snippet)
+    assert is_challenge is False, f"Expected not challenge, got reason: {reason}"
+
+
+def test_dor_html_listing_parser():
+    """Verify Department of Revenue table parser extracts notifications, dates, and PDF links."""
+    dor_html = """
+    <html>
+      <body>
+        <table>
+          <tr><th>Sr. No.</th><th>Title</th><th>Date</th><th>Download</th></tr>
+          <tr>
+            <td>1</td>
+            <td>Notification S.O. 889(E) dated 10.12.2025 Amendment in NDPS Rules</td>
+            <td>10/12/2025</td>
+            <td><a href="/files/notifications_documents/Amendment_in_NDPS_Rules.pdf">Download</a></td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>Notification No. 02/2026 Standard Deduction under Section 16(ia)</td>
+            <td>15/02/2026</td>
+            <td><a href="/files/notifications_documents/Notification_02_2026.pdf">Download</a></td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    items = HtmlListingAdapter.parse("dor", dor_html, "https://dor.gov.in/notifications")
+    assert len(items) == 2
+    assert items[0].doc_number == "Notification S.O. 889(E)"
+    assert str(items[0].issue_date) == "2025-12-10"
+    assert items[0].pdf_url == "https://dor.gov.in/files/notifications_documents/Amendment_in_NDPS_Rules.pdf"
+    assert items[1].doc_number == "Notification No. 02/2026"
+    assert str(items[1].issue_date) == "2026-02-15"
+
+

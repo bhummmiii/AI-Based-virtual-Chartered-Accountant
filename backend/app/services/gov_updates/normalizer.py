@@ -110,31 +110,37 @@ class GovNormalizer:
     def classify_category(cls, source_code: str, title: str, text: str) -> str:
         combined = f"{title} {text}".lower()
 
-        # Source code hints
+        # Content keyword rules (evaluated first so specialized circulars match accurately)
+        if any(k in combined for k in ["tds", "tcs", "tax deducted", "section 194"]):
+            return "TDS"
+        if any(k in combined for k in ["gst", "cgst", "igst", "sgst", "gstin", "gstr"]):
+            return "GST"
+        if any(k in combined for k in ["income-tax", "income tax", "cbdt", "tax audit", "section 44ab", "direct tax", "tax year", "itr"]):
+            return "INCOME_TAX"
+        if any(k in combined for k in ["budget", "finance act", "finance bill", "standard deduction", "union budget"]):
+            return "BUDGET"
+        if any(k in combined for k in ["accounting standard", "ind as", "auditing", "nfra", "icai"]):
+            return "ACCOUNTING"
+        if any(k in combined for k in ["companies act", "mca", "roc", "corporate affairs", "sebi"]):
+            return "COMPANIES"
+        if any(k in combined for k in ["repo rate", "fema", "foreign exchange", "government securities", "omo sale"]):
+            return "BANKING"
+
+        # Source code fallbacks
         if source_code == "gstcouncil":
             return "GST"
+        if source_code == "incometax_feed":
+            return "INCOME_TAX"
+        if source_code == "indiabudget":
+            return "BUDGET"
+        if source_code == "dor":
+            return "INCOME_TAX"
         if source_code in ("rbi_notifications", "rbi_pressreleases"):
             return "BANKING"
         if source_code in ("icai_announcements", "nfra_orders", "icai_idtc"):
             return "ACCOUNTING"
         if source_code in ("sebi_circulars", "mca"):
             return "COMPANIES"
-
-        # Content keyword rules
-        if any(k in combined for k in ["tds", "tcs", "tax deducted"]):
-            return "TDS"
-        if any(k in combined for k in ["gst", "cgst", "igst", "sgst", "gstin", "gstr"]):
-            return "GST"
-        if any(k in combined for k in ["income-tax", "income tax", "cbdt", "tax year", "itr"]):
-            return "INCOME_TAX"
-        if any(k in combined for k in ["budget", "finance act", "finance bill", "standard deduction"]):
-            return "BUDGET"
-        if any(k in combined for k in ["accounting standard", "ind as", "audit", "nfra", "icai"]):
-            return "ACCOUNTING"
-        if any(k in combined for k in ["companies act", "mca", "roc", "corporate affairs", "sebi"]):
-            return "COMPANIES"
-        if any(k in combined for k in ["rbi", "banking", "repo rate", "fema", "foreign exchange"]):
-            return "BANKING"
 
         return "OTHER"
 

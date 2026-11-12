@@ -55,17 +55,6 @@ function GoogleIcon({ className = "size-4" }: { className?: string }) {
   );
 }
 
-function MicrosoftIcon({ className = "size-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 23 23">
-      <path fill="#f35325" d="M1 1h10v10H1z" />
-      <path fill="#81bc06" d="M12 1h10v10H12z" />
-      <path fill="#05a6f0" d="M1 12h10v10H1z" />
-      <path fill="#ffba08" d="M12 12h10v10H12z" />
-    </svg>
-  );
-}
-
 interface LoginProps {
   initialMode?: "login" | "register";
 }
@@ -350,11 +339,10 @@ export function Login({ initialMode = "login" }: LoginProps) {
             setMode("login");
             setLoginErrors({});
           }}
-          className={`flex items-center justify-center rounded-lg py-2.5 text-sm font-semibold transition-all ${
-            mode === "login"
+          className={`flex items-center justify-center rounded-lg py-2.5 text-sm font-semibold transition-all ${mode === "login"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-secondary/80"
-          }`}
+            }`}
         >
           Sign in
         </button>
@@ -364,11 +352,10 @@ export function Login({ initialMode = "login" }: LoginProps) {
             setMode("register");
             setRegErrors({});
           }}
-          className={`flex items-center justify-center rounded-lg py-2.5 text-sm font-semibold transition-all ${
-            mode === "register"
+          className={`flex items-center justify-center rounded-lg py-2.5 text-sm font-semibold transition-all ${mode === "register"
               ? "bg-primary text-primary-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground hover:bg-secondary/80"
-          }`}
+            }`}
         >
           Create account
         </button>
@@ -394,9 +381,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                   const err = validateEmail(loginEmail);
                   if (err) setLoginErrors((p) => ({ ...p, email: err }));
                 }}
-                className={`pl-9 ${
-                  loginErrors.email ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`pl-9 ${loginErrors.email ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="Mahendrapawar@gmail.com"
               />
             </div>
@@ -430,9 +416,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                   const err = validatePassword(loginPassword, false);
                   if (err) setLoginErrors((p) => ({ ...p, password: err }));
                 }}
-                className={`px-9 ${
-                  loginErrors.password ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`px-9 ${loginErrors.password ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="••••••••"
               />
               <button
@@ -480,9 +465,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                     setRegErrors((p) => ({ ...p, name: "Full name must be at least 2 characters" }));
                   }
                 }}
-                className={`pl-9 ${
-                  regErrors.name ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`pl-9 ${regErrors.name ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="Mahendra Pawar"
               />
             </div>
@@ -511,9 +495,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                   const err = validateEmail(regEmail);
                   if (err) setRegErrors((p) => ({ ...p, email: err }));
                 }}
-                className={`pl-9 ${
-                  regErrors.email ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`pl-9 ${regErrors.email ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="Mahendrapawar@gmail.com"
               />
             </div>
@@ -546,9 +529,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                   const err = validatePassword(regPassword, true);
                   if (err) setRegErrors((p) => ({ ...p, password: err }));
                 }}
-                className={`px-9 ${
-                  regErrors.password ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`px-9 ${regErrors.password ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="Create password (min 8 characters)"
               />
               <button
@@ -587,9 +569,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                     setRegErrors((p) => ({ ...p, confirmPassword: "Passwords do not match" }));
                   }
                 }}
-                className={`px-9 ${
-                  regErrors.confirmPassword ? "border-destructive focus-visible:ring-destructive" : ""
-                }`}
+                className={`px-9 ${regErrors.confirmPassword ? "border-destructive focus-visible:ring-destructive" : ""
+                  }`}
                 placeholder="Re-enter password"
               />
               <button
@@ -619,48 +600,24 @@ export function Login({ initialMode = "login" }: LoginProps) {
         <span className="h-px flex-1 bg-border" /> or continue with <span className="h-px flex-1 bg-border" />
       </div>
 
-      {/* ── Social OAuth Buttons ── */}
-      <div className="grid grid-cols-2 gap-3">
-        <Button
-          variant="outline"
-          type="button"
-          className="gap-2 font-medium hover:bg-secondary/60 hover:border-primary/40 transition-all"
-          onClick={() => {
-            setRecentAccounts(getRecentAccounts());
-            setGoogleStep("account");
-            setSelectedGoogleAccount(null);
-            setGooglePassword("");
-            setGooglePasswordError("");
-            setGoogleCustomError("");
-            setGoogleModalOpen(true);
-          }}
-        >
-          <GoogleIcon className="size-4" />
-          Google
-        </Button>
-        <Button
-          variant="outline"
-          type="button"
-          className="gap-2 font-medium hover:bg-secondary/60 transition-all"
-          onClick={() => {
-            if (loginEmail && validateEmail(loginEmail) === null) {
-              handleSelectAccountForPassword(loginEmail, loginEmail.split("@")[0]);
-              setGoogleModalOpen(true);
-            } else {
-              setRecentAccounts(getRecentAccounts());
-              setGoogleStep("account");
-              setSelectedGoogleAccount(null);
-              setGooglePassword("");
-              setGooglePasswordError("");
-              setGoogleCustomError("");
-              setGoogleModalOpen(true);
-            }
-          }}
-        >
-          <MicrosoftIcon className="size-4" />
-          Microsoft
-        </Button>
-      </div>
+      {/* ── Social OAuth Button ── */}
+      <Button
+        variant="outline"
+        type="button"
+        className="w-full gap-2.5 font-medium hover:bg-secondary/60 hover:border-primary/40 transition-all"
+        onClick={() => {
+          setRecentAccounts(getRecentAccounts());
+          setGoogleStep("account");
+          setSelectedGoogleAccount(null);
+          setGooglePassword("");
+          setGooglePasswordError("");
+          setGoogleCustomError("");
+          setGoogleModalOpen(true);
+        }}
+      >
+        <GoogleIcon className="size-4" />
+        Continue with Google
+      </Button>
 
       {/* ── Footer Toggle Link ── */}
       <p className="mt-7 text-center text-sm text-muted-foreground">
@@ -785,9 +742,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                       if (googleCustomError) setGoogleCustomError("");
                     }}
                     placeholder="e.g. anushka@gmail.com"
-                    className={`text-xs ${
-                      googleCustomError ? "border-destructive focus-visible:ring-destructive" : ""
-                    }`}
+                    className={`text-xs ${googleCustomError ? "border-destructive focus-visible:ring-destructive" : ""
+                      }`}
                   />
                   {googleCustomError && (
                     <p className="flex items-center gap-1 text-[11px] text-destructive">
@@ -826,9 +782,8 @@ export function Login({ initialMode = "login" }: LoginProps) {
                       setGooglePassword(e.target.value);
                       if (googlePasswordError) setGooglePasswordError("");
                     }}
-                    className={`px-9 ${
-                      googlePasswordError ? "border-destructive focus-visible:ring-destructive" : ""
-                    }`}
+                    className={`px-9 ${googlePasswordError ? "border-destructive focus-visible:ring-destructive" : ""
+                      }`}
                     placeholder="Enter your account password"
                   />
                   <button

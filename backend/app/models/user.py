@@ -21,7 +21,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     phone = Column(String(20), nullable=True)
     role = Column(String(50), nullable=False, default="ca")  # ca | admin | staff | accountant
-    profile_image = Column(String(500), nullable=True)
+    profile_image = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

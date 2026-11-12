@@ -38,7 +38,7 @@ SOURCE_FETCH_ENDPOINTS = {
     "gstn_news": "https://www.gst.gov.in/newsandupdates",
     "mca": "https://www.mca.gov.in/content/mca/global/en/notifications-circulars.html",
     "indiabudget": "https://www.indiabudget.gov.in",
-    "dor": "https://dor.gov.in/press-release",
+    "dor": "https://dor.gov.in/notifications",
     "cbic_taxinfo": "https://taxinformation.cbic.gov.in",
     "cbic_gst": "https://cbic-gst.gov.in",
     "finmin": "https://finmin.gov.in",

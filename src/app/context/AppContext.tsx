@@ -20,6 +20,7 @@ import { getToken } from "../services/api";
 type AppState = {
   theme: "light" | "dark";
   toggleTheme: () => void;
+  setTheme: (theme: "light" | "dark") => void;
   clients: Client[];
   loading: boolean;
   error: string | null;
@@ -204,6 +205,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         theme,
         toggleTheme,
+        setTheme,
         clients,
         loading,
         error,

@@ -6,6 +6,7 @@ Implements dedicated parsers for:
 - e-Gazette Recent Extraordinary (egazette.gov.in)
 - NFRA Orders (nfra.gov.in)
 - SEBI Circulars (sebi.gov.in)
+- Department of Revenue (dor.gov.in)
 Never guesses dates; returns None if unparseable (R4).
 """
 
@@ -93,6 +94,8 @@ class HtmlListingAdapter:
             return cls._parse_nfra(html_text, base_url)
         elif source_code == "sebi_circulars":
             return cls._parse_sebi(html_text, base_url)
+        elif source_code == "dor":
+            return cls._parse_dor(html_text, base_url)
         else:
             return cls._parse_generic_listing(html_text, base_url)
 
@@ -460,6 +463,60 @@ class HtmlListingAdapter:
                     content_text=title,
                     text_status="ok",
                     raw_metadata={"source": "sebi"},
+                )
+            )
+
+        return items
+
+    @classmethod
+    def _parse_dor(cls, html_text: str, base_url: str) -> List[RawUpdateItem]:
+        soup = BeautifulSoup(html_text, "html.parser")
+        items: List[RawUpdateItem] = []
+        table = soup.find("table")
+        if not table:
+            return cls._parse_generic_listing(html_text, base_url)
+
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if len(tds) < 3:
+                continue
+
+            title = tds[1].get_text(separator=" ", strip=True)
+            if not title or len(title) < 5:
+                continue
+
+            date_str = tds[2].get_text(strip=True)
+            issue_d, prec = parse_date_strict(date_str)
+            if not issue_d:
+                issue_d, prec = parse_date_strict(title)
+
+            a = tr.find("a", href=True)
+            if a:
+                pdf_link = urljoin(base_url, a["href"])
+            else:
+                pdf_link = base_url
+
+            doc_no = None
+            m = re.search(r"(?:(?:Notification|Circular|Order|G\.S\.R\.|S\.O\.)\s*(?:(?:No\.?|S\.O\.?)\s*)?[A-Za-z0-9\(\)\-/\.]+)", title, re.IGNORECASE)
+            if m:
+                doc_no = m.group(0).strip()
+
+            link_quality = "direct_document" if pdf_link.lower().endswith(".pdf") else "listing_only"
+
+            items.append(
+                RawUpdateItem(
+                    title=title,
+                    url=pdf_link,
+                    doc_number=doc_no,
+                    doc_number_source="listing" if doc_no else None,
+                    issue_date=issue_d,
+                    issue_date_source="listing" if issue_d else "none",
+                    date_precision=prec,
+                    pdf_url=pdf_link if pdf_link.lower().endswith(".pdf") else None,
+                    link_quality=link_quality,
+                    content_text=title,
+                    text_status="ok",
+                    raw_metadata={"source": "dor", "authority": "Department of Revenue, Ministry of Finance"},
                 )
             )
 

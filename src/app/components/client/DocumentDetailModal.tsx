@@ -624,11 +624,47 @@ const authHeaders = (extra: Record<string, string> = {}) => {
   return { ...extra, ...(t ? { Authorization: `Bearer ${t}` } : {}) };
 };
 
-function parseMeta(raw?: string | null): ParsedMeta {
+function parseMeta(raw?: unknown): ParsedMeta {
   if (!raw) return {};
   try {
-    const p = JSON.parse(raw);
-    return typeof p === "object" && p !== null ? (p as ParsedMeta) : {};
+    let p: any = raw;
+    if (typeof raw === "string") {
+      p = JSON.parse(raw);
+    }
+    if (typeof p !== "object" || p === null) return {};
+
+    // 1. Unwrap stringified fields if present
+    if (p.fields && typeof p.fields === "string") {
+      try {
+        p.fields = JSON.parse(p.fields);
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Unwrap nested fields object if doubly-nested (e.g. { fields: { fields: { ... } } })
+    if (p.fields && typeof p.fields === "object" && !Array.isArray(p.fields)) {
+      const fObj = { ...p.fields };
+      if (fObj.fields && typeof fObj.fields === "object" && !Array.isArray(fObj.fields)) {
+        const inner = fObj.fields as Record<string, unknown>;
+        delete fObj.fields;
+        p.fields = { ...inner, ...fObj };
+      }
+      // Hoist structural elements from fields if missing at top level
+      if (!p.table_data && fObj.table_data) p.table_data = fObj.table_data;
+      if (!p.line_items && fObj.line_items) p.line_items = fObj.line_items;
+      if (!p.line_item_headers && fObj.line_item_headers) p.line_item_headers = fObj.line_item_headers;
+
+      // Clean up structural and recursive keys from fields
+      delete (p.fields as any).table_data;
+      delete (p.fields as any).line_items;
+      delete (p.fields as any).line_item_headers;
+      delete (p.fields as any).hsn_summary;
+      delete (p.fields as any).fields;
+      delete (p.fields as any).fields_raw;
+    }
+
+    return p as ParsedMeta;
   } catch {
     return {};
   }
@@ -1740,18 +1776,69 @@ export function DocumentDetailModal({
   /** Additional fields: keys in meta.fields NOT already rendered via schema */
   const additionalFields = useMemo(() => {
     const fields = (meta.fields ?? {}) as Record<string, unknown>;
-    const schemaKeys = new Set(schema.map((s) => String(s.key)));
+    const schemaKeys = new Set(schema.map((s) => String(s.key).toLowerCase()));
+
+    // Set of all aliases of all schema keys
+    const allSchemaAliases = new Set<string>();
+    for (const s of schema) {
+      allSchemaAliases.add(String(s.key).toLowerCase());
+      const aliases = (FIELD_ALIASES[s.key] ?? []) as readonly string[];
+      for (const a of aliases) {
+        allSchemaAliases.add(a.toLowerCase());
+      }
+    }
+
+    // Set of normalized values already rendered in standardFields
+    const renderedValues = new Set<string>();
+    for (const sf of standardFields) {
+      if (!isEmpty(sf.value)) {
+        renderedValues.add(String(sf.value).trim().toLowerCase());
+      }
+    }
+
+    // Structural / system keys that should never be displayed as document field rows
+    const SYSTEM_KEYS = new Set([
+      "fields", "fields_raw", "raw", "metadata", "metadata_",
+      "table_data", "line_items", "line_item_headers", "hsn_summary",
+      "ocr_confidence", "field_verification", "field_verification_raw",
+      "extraction_method", "accuracy_verification", "image_quality",
+      "cleaned_image_url", "confidence_breakdown", "linked_invoice_id",
+      "linked_invoice_number", "linked_at", "notice_status", "notice_updated_at",
+    ]);
+
     const out: Array<{ label: string; key: string; value: string }> = [];
     for (const [k, v] of Object.entries(fields)) {
-      if (schemaKeys.has(k)) continue;
-      if (CORE_KEYS.has(k)) continue;
-      if (k === "line_items" || k === "line_item_headers" || k === "table_data") continue;
-      if (k === "ocr_confidence" || k === "field_verification" || k === "extraction_method") continue;
+      const kLower = k.toLowerCase();
+      if (SYSTEM_KEYS.has(kLower)) continue;
+      if (schemaKeys.has(kLower)) continue;
+      if (CORE_KEYS.has(kLower)) continue;
+      if (allSchemaAliases.has(kLower)) continue;
       if (isEmpty(v)) continue;
-      out.push({ label: humanize(k), key: k, value: formatValue(v, k) });
+
+      // If value is a nested object or array of objects, skip it (structural data, not a scalar field)
+      if (typeof v === "object" && v !== null) {
+        // If it's a confidence wrapper like { value: "...", confidence: "..." }, unwrap it
+        if ("value" in (v as any) && typeof (v as any).value !== "object") {
+          const innerVal = (v as any).value;
+          if (isEmpty(innerVal)) continue;
+          const formatted = formatValue(innerVal, k);
+          if (renderedValues.has(formatted.trim().toLowerCase())) continue;
+          out.push({ label: humanize(k), key: k, value: formatted });
+          continue;
+        }
+        // Otherwise, skip complex nested objects/arrays to avoid dumping raw JSON into the UI
+        continue;
+      }
+
+      const formatted = formatValue(v, k);
+      if (isEmpty(formatted)) continue;
+      // Skip if this exact value is already rendered in standardFields
+      if (renderedValues.has(formatted.trim().toLowerCase())) continue;
+
+      out.push({ label: humanize(k), key: k, value: formatted });
     }
     return out;
-  }, [meta, schema]);
+  }, [meta, schema, standardFields]);
 
   /* — Editing State — */
   const [isEditing, setIsEditing] = useState(false);

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { AppProvider } from "./context/AppContext";
+import { LanguageProvider } from "./context/LanguageContext";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
@@ -17,25 +18,27 @@ import { Settings } from "./pages/Settings";
 export default function App() {
   return (
     <AppProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/forgot" element={<Forgot />} />
-          <Route path="/otp" element={<Otp />} />
-          <Route path="/app" element={<AppLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="workspace" element={<Workspace />} />
-            <Route path="workspace/:clientId" element={<ClientWorkspace />} />
-            <Route path="assistant" element={<Assistant />} />
-            <Route path="updates" element={<GovRules />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-      <Toaster richColors position="top-right" />
+      <LanguageProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/forgot" element={<Forgot />} />
+            <Route path="/otp" element={<Otp />} />
+            <Route path="/app" element={<AppLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="workspace" element={<Workspace />} />
+              <Route path="workspace/:clientId" element={<ClientWorkspace />} />
+              <Route path="assistant" element={<Assistant />} />
+              <Route path="updates" element={<GovRules />} />
+              <Route path="reports" element={<Reports />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+        <Toaster richColors position="top-right" />
+      </LanguageProvider>
     </AppProvider>
   );
 }

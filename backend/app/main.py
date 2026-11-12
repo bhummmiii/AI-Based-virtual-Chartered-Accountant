@@ -23,7 +23,8 @@ from app.api.routers.reports.router import router as reports_router
 from app.api.routers.chatbot.router import router as chatbot_router
 from app.api.routers.notifications.router import router as notifications_router
 from app.api.routers.gov_updates.router import router as gov_updates_router
-# Register all 10 models with Base.metadata
+from app.api.routers.settings.router import router as settings_router
+# Register all models with Base.metadata
 import app.models  # noqa: F401
 
 settings = get_settings()
@@ -110,3 +111,4 @@ app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
 app.include_router(chatbot_router, prefix="/api/v1/chatbot", tags=["Chatbot"])
 app.include_router(notifications_router, prefix="/api/v1/notifications", tags=["Notifications"])
 app.include_router(gov_updates_router, prefix="/api/v1/gov-updates", tags=["Government Updates"])
+app.include_router(settings_router, prefix="/api/v1/settings", tags=["Settings"])

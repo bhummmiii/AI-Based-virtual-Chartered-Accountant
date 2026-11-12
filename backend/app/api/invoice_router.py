@@ -76,7 +76,7 @@ def _parse_decimal_safe(val: Any) -> Optional[Decimal]:
 
 def _build_metadata(
     metadata_json: Optional[str],
-    field_verification: Optional[str],
+    field_verification: Optional[str] = None,
     extraction_method: Optional[str] = None,
 ) -> Optional[str]:
     """Merge metadata_json, field_verification, and extraction_method into a single JSON string for the metadata_ column."""
@@ -85,11 +85,52 @@ def _build_metadata(
     if metadata_json:
         try:
             parsed = _json.loads(metadata_json)
-            result["fields"] = parsed
             if isinstance(parsed, dict):
-                for k in ("table_data", "line_items", "line_item_headers"):
+                # 1. Structural / system keys that belong at root level of result, NOT inside fields
+                structural_keys = (
+                    "table_data",
+                    "line_items",
+                    "line_item_headers",
+                    "hsn_summary",
+                    "accuracy_verification",
+                    "image_quality",
+                    "cleaned_image_url",
+                )
+                for k in structural_keys:
                     if k in parsed:
                         result[k] = parsed[k]
+
+                # 2. Extract actual fields dictionary (unwrap if nested under "fields")
+                raw_fields = parsed.get("fields")
+                if isinstance(raw_fields, dict):
+                    fields_dict = dict(raw_fields)
+                    # Pull in any top-level scalar keys from parsed that aren't structural
+                    for pk, pv in parsed.items():
+                        if (
+                            pk not in structural_keys
+                            and pk not in ("fields", "field_verification", "extraction_method", "fields_raw")
+                            and pk not in fields_dict
+                        ):
+                            fields_dict[pk] = pv
+                else:
+                    fields_dict = {
+                        k: v for k, v in parsed.items()
+                        if k not in structural_keys and k not in ("fields", "field_verification", "extraction_method", "fields_raw")
+                    }
+
+                # Ensure structural keys and nested "fields" are purged from fields_dict
+                for sk in structural_keys + ("fields", "fields_raw"):
+                    fields_dict.pop(sk, None)
+
+                # Also if structural keys were inside raw_fields, hoist them to result
+                if isinstance(raw_fields, dict):
+                    for k in structural_keys:
+                        if k in raw_fields and k not in result:
+                            result[k] = raw_fields[k]
+
+                result["fields"] = fields_dict
+            else:
+                result["fields"] = parsed
         except Exception:
             result["fields_raw"] = metadata_json
     if field_verification:
@@ -241,32 +282,107 @@ async def upload_document(
                 pass
 
         form_g = (gstin or "").strip().upper()
-        if len(form_g) == 15:
-            if not up_supplier_gst and not up_customer_gst:
-                if document_category in ("sales_records", "b2c_invoice") and form_g != client_gstin:
+        client_pan = client_gstin[2:12] if len(client_gstin) >= 12 else ""
+
+        def _is_client_gst(g: str) -> bool:
+            if not g:
+                return False
+            g = g.strip().upper()
+            if g == client_gstin:
+                return True
+            if len(g) == 15 and len(client_gstin) == 15:
+                # 1. PAN match (characters 2 to 12)
+                if client_pan and g[2:12] == client_pan:
+                    return True
+                # 2. OCR typo tolerance (diff count <= 2 e.g. F vs G, 8 vs B, 0 vs O)
+                diffs = sum(1 for a, b in zip(g, client_gstin) if a != b)
+                if diffs <= 2:
+                    return True
+            return False
+
+        v_str = (vendor or "").strip().lower()
+        c_str = (client.company_name or "").strip().lower()
+        vendor_matches_client = bool(c_str and v_str and (c_str in v_str or v_str in c_str))
+
+        cust_str = (customer or "").strip().lower()
+        customer_matches_client = bool(c_str and cust_str and (c_str in cust_str or cust_str in c_str))
+
+        # For sales documents (sales_records, b2c_invoice, b2b_invoice, e_invoice):
+        # The client is the seller/supplier (client_gstin).
+        if document_category in ("sales_records", "b2c_invoice", "b2b_invoice", "e_invoice"):
+            if _is_client_gst(up_supplier_gst) or vendor_matches_client or _is_client_gst(form_g):
+                if form_g and not _is_client_gst(form_g) and not up_customer_gst:
+                    up_customer_gst = form_g
+                up_supplier_gst = client_gstin
+                gstin = client_gstin
+            elif form_g and len(form_g) == 15 and not _is_client_gst(form_g):
+                if not up_supplier_gst and not up_customer_gst:
                     raise BadRequestException(
                         detail=f"CLIENT_MISMATCH: Sales document supplier GSTIN '{form_g}' does not match client GSTIN '{client_gstin}'."
                     )
-            elif not up_supplier_gst and form_g == client_gstin:
-                up_supplier_gst = form_g
+        elif document_category in ("purchase_records", "bills"):
+            if customer_matches_client or _is_client_gst(up_customer_gst):
+                up_customer_gst = client_gstin
+                if _is_client_gst(form_g):
+                    if up_supplier_gst:
+                        gstin = up_supplier_gst
+            elif _is_client_gst(form_g):
+                up_customer_gst = client_gstin
+        elif len(form_g) == 15:
+            if not up_supplier_gst and not up_customer_gst:
+                if _is_client_gst(form_g):
+                    up_supplier_gst = client_gstin
+            elif not up_supplier_gst and _is_client_gst(form_g):
+                up_supplier_gst = client_gstin
+
+        if vendor_matches_client:
+            up_supplier_gst = client_gstin
+            gstin = client_gstin
+        elif up_supplier_gst and _is_client_gst(up_supplier_gst):
+            up_supplier_gst = client_gstin
+
+        if customer_matches_client:
+            up_customer_gst = client_gstin
+        elif up_customer_gst and _is_client_gst(up_customer_gst):
+            up_customer_gst = client_gstin
 
         if up_supplier_gst and up_customer_gst:
             if len(up_supplier_gst) == 15 and len(up_customer_gst) == 15:
-                if up_supplier_gst != client_gstin and up_customer_gst != client_gstin:
+                if not _is_client_gst(up_supplier_gst) and not _is_client_gst(up_customer_gst):
                     raise BadRequestException(
                         detail=f"CLIENT_MISMATCH: Document does not belong to client '{client.company_name}' ({client_gstin}). "
                                f"Supplier GSTIN ({up_supplier_gst}) and Recipient GSTIN ({up_customer_gst}) both differ from client GSTIN."
                     )
         elif up_supplier_gst and len(up_supplier_gst) == 15:
-            if document_category in ("sales_records", "b2c_invoice") and up_supplier_gst != client_gstin:
+            if document_category in ("sales_records", "b2c_invoice") and not _is_client_gst(up_supplier_gst):
                 raise BadRequestException(
                     detail=f"CLIENT_MISMATCH: Sales document supplier GSTIN '{up_supplier_gst}' does not match client GSTIN '{client_gstin}'."
                 )
         elif up_customer_gst and len(up_customer_gst) == 15:
-            if document_category in ("purchase_records",) and up_customer_gst != client_gstin:
+            if document_category in ("purchase_records",) and not _is_client_gst(up_customer_gst):
                 raise BadRequestException(
                     detail=f"CLIENT_MISMATCH: Purchase document recipient GSTIN '{up_customer_gst}' does not match client GSTIN '{client_gstin}'."
                 )
+
+        # Sync metadata_json with normalized client GSTIN
+        if up_supplier_gst == client_gstin and metadata_json:
+            try:
+                m_obj = _json.loads(metadata_json)
+                if isinstance(m_obj, dict):
+                    m_f = m_obj.get("fields") if isinstance(m_obj.get("fields"), dict) else m_obj
+                    if "supplier_gstin" in m_f:
+                        if isinstance(m_f["supplier_gstin"], dict):
+                            m_f["supplier_gstin"]["value"] = client_gstin
+                        else:
+                            m_f["supplier_gstin"] = client_gstin
+                    if "gstin" in m_f:
+                        if isinstance(m_f["gstin"], dict):
+                            m_f["gstin"]["value"] = client_gstin
+                        else:
+                            m_f["gstin"] = client_gstin
+                    metadata_json = _json.dumps(m_obj)
+            except Exception:
+                pass
 
     # ── Duplicate detection ──
     if not _force_save:
@@ -717,6 +833,10 @@ def update_document(
     if not isinstance(meta_fields, dict):
         meta_fields = {}
 
+    # Strip any accidental recursive 'fields' container or structural keys
+    for sk in ("fields", "fields_raw", "table_data", "line_items", "line_item_headers", "hsn_summary"):
+        meta_fields.pop(sk, None)
+
     if payload.fields is not None:
         raw_fields = payload.fields
 
@@ -731,6 +851,8 @@ def update_document(
 
         # Merge into metadata fields
         for k, v in raw_fields.items():
+            if k in ("fields", "fields_raw", "table_data", "line_items", "line_item_headers", "hsn_summary"):
+                continue
             if v is None or str(v).strip() == "":
                 if k in meta_fields:
                     del meta_fields[k]

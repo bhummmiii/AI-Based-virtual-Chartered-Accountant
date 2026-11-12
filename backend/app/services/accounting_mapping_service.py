@@ -87,30 +87,11 @@ class AccountingMappingService:
         cess = Decimal(str(doc.cess)).quantize(Decimal("0.01")) if doc.cess else Decimal("0.00")
         tot_tax = cgst + sgst + igst + cess
 
-        # ── 1. Validate Component Sum vs Printed Total ────────────────────────
-        if doc.taxable_amount is not None:
-            taxable_amount = Decimal(str(doc.taxable_amount)).quantize(Decimal("0.01"))
-            expected_total = taxable_amount + tot_tax
-            diff_math = abs(gross_amount - expected_total)
-            if diff_math > Decimal("0.05"):
-                raise BadRequestException(
-                    detail=f"Posting blocked: Sum of components (taxable ₹{taxable_amount} + taxes ₹{tot_tax} = ₹{expected_total}) "
-                           f"differs from printed total (₹{gross_amount}) by ₹{diff_math}."
-                )
-        else:
-            if tot_tax > Decimal("0.00"):
-                taxable_amount = gross_amount - tot_tax
-                if taxable_amount < Decimal("0.00"):
-                    raise BadRequestException(
-                        detail=f"Posting blocked: Taxes (₹{tot_tax}) exceed printed total (₹{gross_amount})."
-                    )
-            else:
-                taxable_amount = gross_amount
-
-        # ── 2. Decide Direction from Issuer and Client's GSTIN ─────────────────
+        # ── 1. Extract Metadata Fields & Round Off ────────────────────────────
         meta_supplier_gstin = ""
         meta_customer_gstin = ""
         meta_orig_inv_no = ""
+        meta_round_off = None
         if doc.metadata_:
             try:
                 import json
@@ -126,28 +107,83 @@ class AccountingMappingService:
                 meta_supplier_gstin = str(_extract("supplier_gstin") or _extract("seller_gstin") or _extract("vendor_gstin") or "").strip().upper()
                 meta_customer_gstin = str(_extract("customer_gstin") or _extract("buyer_gstin") or _extract("recipient_gstin") or "").strip().upper()
                 meta_orig_inv_no = str(_extract("original_invoice_number") or _extract("original_invoice_no") or _extract("against_invoice_number") or _extract("reference_invoice_number") or _extract("ref_invoice_number") or "").strip()
+                _ro_cand = _extract("round_off") or _extract("rounding") or _extract("rounding_off")
+                if _ro_cand is not None and str(_ro_cand).strip():
+                    try:
+                        meta_round_off = abs(Decimal(str(_ro_cand).replace(",", "").strip()))
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
+        # ── 2. Validate Component Sum vs Printed Total ────────────────────────
+        if doc.taxable_amount is not None:
+            taxable_amount = Decimal(str(doc.taxable_amount)).quantize(Decimal("0.01"))
+            expected_total = taxable_amount + tot_tax
+            diff_math = abs(gross_amount - expected_total)
+            # Allow standard invoice rounding differences (up to ₹2.00) or explicit round_off from metadata
+            is_valid_rounding = (diff_math <= Decimal("2.00")) or (
+                meta_round_off is not None and abs(diff_math - meta_round_off) <= Decimal("0.05")
+            )
+            if not is_valid_rounding:
+                raise BadRequestException(
+                    detail=f"Posting blocked: Sum of components (taxable ₹{taxable_amount} + taxes ₹{tot_tax} = ₹{expected_total}) "
+                           f"differs from printed total (₹{gross_amount}) by ₹{diff_math}."
+                )
+        else:
+            if tot_tax > Decimal("0.00"):
+                taxable_amount = gross_amount - tot_tax
+                if taxable_amount < Decimal("0.00"):
+                    raise BadRequestException(
+                        detail=f"Posting blocked: Taxes (₹{tot_tax}) exceed printed total (₹{gross_amount})."
+                    )
+            else:
+                taxable_amount = gross_amount
+
         doc_gstin = (doc.gstin or "").strip().upper()
 
-        # C3: Check Client GSTIN Anchor & CLIENT_MISMATCH
+        # C3: Check Client GSTIN Anchor & CLIENT_MISMATCH with PAN & OCR typo tolerance
+        client_pan = client_gstin[2:12] if len(client_gstin) >= 12 else ""
+        def _is_client_gst(g: str) -> bool:
+            if not g:
+                return False
+            g = g.strip().upper()
+            if g == client_gstin:
+                return True
+            if len(g) == 15 and len(client_gstin) == 15:
+                if client_pan and g[2:12] == client_pan:
+                    return True
+                diffs = sum(1 for a, b in zip(g, client_gstin) if a != b)
+                if diffs <= 2:
+                    return True
+            return False
+
         if client_gstin and not allow_client_mismatch:
+            if meta_supplier_gstin and _is_client_gst(meta_supplier_gstin):
+                meta_supplier_gstin = client_gstin
+            elif client_name and doc.vendor and (client_name.lower() in doc.vendor.lower() or doc.vendor.lower() in client_name.lower()):
+                meta_supplier_gstin = client_gstin
+
+            if meta_customer_gstin and _is_client_gst(meta_customer_gstin):
+                meta_customer_gstin = client_gstin
+            elif client_name and doc.customer and (client_name.lower() in doc.customer.lower() or doc.customer.lower() in client_name.lower()):
+                meta_customer_gstin = client_gstin
+
             if meta_supplier_gstin and meta_customer_gstin:
-                if meta_supplier_gstin != client_gstin and meta_customer_gstin != client_gstin:
+                if not _is_client_gst(meta_supplier_gstin) and not _is_client_gst(meta_customer_gstin):
                     raise BadRequestException(
                         detail=f"CLIENT_MISMATCH: Document does not belong to this client. "
                                f"Supplier GSTIN ({meta_supplier_gstin}) and Recipient GSTIN ({meta_customer_gstin}) "
                                f"both differ from Client GSTIN ({client_gstin})."
                     )
             elif meta_supplier_gstin and not meta_customer_gstin:
-                if meta_supplier_gstin != client_gstin and cat in {"sales_records", "b2c_invoice"}:
+                if not _is_client_gst(meta_supplier_gstin) and cat in {"sales_records", "b2c_invoice"}:
                     raise BadRequestException(
                         detail=f"CLIENT_MISMATCH: Document does not belong to this client. "
                                f"Sales invoice supplier ({meta_supplier_gstin}) does not match Client ({client_gstin})."
                     )
             elif meta_customer_gstin and not meta_supplier_gstin:
-                if meta_customer_gstin != client_gstin and cat in {"purchase_records"}:
+                if not _is_client_gst(meta_customer_gstin) and cat in {"purchase_records"}:
                     raise BadRequestException(
                         detail=f"CLIENT_MISMATCH: Document does not belong to this client. "
                                f"Purchase invoice recipient ({meta_customer_gstin}) does not match Client ({client_gstin})."
@@ -325,22 +361,6 @@ class AccountingMappingService:
                 )
             )
 
-            diff = gross_amount - (taxable_amount + tot_tax)
-            if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                if diff < Decimal("0"):
-                    debit_lines.append(JournalEntryLineCreate(
-                        account_id=round_acc.id,
-                        debit_amount=abs(diff),
-                        credit_amount=Decimal("0.00"),
-                        description="Rounding adjustment",
-                    ))
-                else:
-                    credit_lines.append(JournalEntryLineCreate(
-                        account_id=round_acc.id,
-                        debit_amount=Decimal("0.00"),
-                        credit_amount=diff,
-                        description="Rounding adjustment",
-                    ))
 
             # Credits: Output Taxes Split
             if cgst > Decimal("0") and cgst_acc:
@@ -445,22 +465,6 @@ class AccountingMappingService:
                 )
             )
 
-            diff = gross_amount - (taxable_amount + tot_tax)
-            if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                if diff > Decimal("0"):
-                    debit_lines.append(JournalEntryLineCreate(
-                        account_id=round_acc.id,
-                        debit_amount=diff,
-                        credit_amount=Decimal("0.00"),
-                        description="Rounding adjustment",
-                    ))
-                else:
-                    credit_lines.append(JournalEntryLineCreate(
-                        account_id=round_acc.id,
-                        debit_amount=Decimal("0.00"),
-                        credit_amount=abs(diff),
-                        description="Rounding adjustment",
-                    ))
 
             # Credits: Creditor (Gross)
             credit_lines.append(
@@ -530,22 +534,6 @@ class AccountingMappingService:
                         tax_head="cess",
                     ))
 
-                diff = gross_amount - (taxable_amount + tot_tax)
-                if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                    if diff < Decimal("0"):
-                        debit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=abs(diff),
-                            credit_amount=Decimal("0.00"),
-                            description="Rounding adjustment",
-                        ))
-                    else:
-                        credit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=Decimal("0.00"),
-                            credit_amount=diff,
-                            description="Rounding adjustment",
-                        ))
 
                 # Credits: Debtor Credited (Gross)
                 credit_lines.append(JournalEntryLineCreate(
@@ -579,22 +567,6 @@ class AccountingMappingService:
                     party_gstin=doc.gstin,
                 ))
 
-                diff = gross_amount - (taxable_amount + tot_tax)
-                if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                    if diff > Decimal("0"):
-                        debit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=diff,
-                            credit_amount=Decimal("0.00"),
-                            description="Rounding adjustment",
-                        ))
-                    else:
-                        credit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=Decimal("0.00"),
-                            credit_amount=abs(diff),
-                            description="Rounding adjustment",
-                        ))
 
                 # Credits: Purchase Return + Input Taxes Reversals
                 credit_lines.append(JournalEntryLineCreate(
@@ -678,22 +650,6 @@ class AccountingMappingService:
                     party_gstin=party_gst,
                 ))
 
-                diff = gross_amount - (taxable_amount + tot_tax)
-                if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                    if diff > Decimal("0"):
-                        debit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=diff,
-                            credit_amount=Decimal("0.00"),
-                            description="Rounding adjustment",
-                        ))
-                    else:
-                        credit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=Decimal("0.00"),
-                            credit_amount=abs(diff),
-                            description="Rounding adjustment",
-                        ))
 
                 # Credits: Purchase Return + Input Taxes Reversals
                 credit_lines.append(JournalEntryLineCreate(
@@ -757,22 +713,6 @@ class AccountingMappingService:
                     party_gstin=doc.gstin,
                 ))
 
-                diff = gross_amount - (taxable_amount + tot_tax)
-                if abs(diff) > Decimal("0") and abs(diff) <= Decimal("0.05") and round_acc:
-                    if diff < Decimal("0"):
-                        debit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=abs(diff),
-                            credit_amount=Decimal("0.00"),
-                            description="Rounding adjustment",
-                        ))
-                    else:
-                        credit_lines.append(JournalEntryLineCreate(
-                            account_id=round_acc.id,
-                            debit_amount=Decimal("0.00"),
-                            credit_amount=diff,
-                            description="Rounding adjustment",
-                        ))
 
                 # Credits: Other Sales/Income + Output Taxes
                 credit_lines.append(JournalEntryLineCreate(
@@ -838,6 +778,30 @@ class AccountingMappingService:
 
         else:
             raise BadRequestException(detail=f"Category '{cat}' does not support automatic journal posting")
+
+        # ── 5. Ensure Double-Entry Debits Exactly Equal Credits via Round Off ───
+        subtotal_dr = sum(l.debit_amount for l in debit_lines)
+        subtotal_cr = sum(l.credit_amount for l in credit_lines)
+        rounding_diff = subtotal_dr - subtotal_cr
+        if abs(rounding_diff) > Decimal("0"):
+            round_acc_final = acc_map.get("5150") or (
+                acc_map.get("4010") if is_outward else acc_map.get("5010")
+            )
+            if round_acc_final:
+                if rounding_diff > Decimal("0"):
+                    credit_lines.append(JournalEntryLineCreate(
+                        account_id=round_acc_final.id,
+                        debit_amount=Decimal("0.00"),
+                        credit_amount=rounding_diff,
+                        description="Rounding adjustment",
+                    ))
+                else:
+                    debit_lines.append(JournalEntryLineCreate(
+                        account_id=round_acc_final.id,
+                        debit_amount=abs(rounding_diff),
+                        credit_amount=Decimal("0.00"),
+                        description="Rounding adjustment",
+                    ))
 
         lines = debit_lines + credit_lines
 
